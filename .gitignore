@@ -1,0 +1,33 @@
+node_modules
+dist
+out
+.DS_Store
+.eslintcache
+*.log*
+
+# Build files
+*.exe
+*.msi
+*.dmg
+*.AppImage
+*.zip
+*.tar.gz
+
+# Release folders
+Final_Release/
+landing-page/*.exe
+landing-page/*.zip
+
+# Database
+database.sqlite
+*.db
+*.sqlite
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+temp/
+*.cache
