@@ -1,61 +1,23 @@
 appId: com.perfumeshop.system
-productName: 'سيستم محل عطور بريميوم'
+productName: 'ElatorPerfume'
 directories:
-  output: dist
-  buildResources: build
+  output: dist_v2
 files:
   - out/**/*
   - resources/**/*
   - package.json
-  - '!**/node_modules' # electron-builder will auto-inject PRODUCTION dependencies
 asar: true
-asarUnpack:
-  - resources/**
 win:
-  executableName: 'PerfumeShopSystem'
+  executableName: "ElatorPerfume"
   icon: resources/app_icon.jpg
   compression: maximum
   target:
     - target: nsis
       arch:
         - x64
-    - target: portable
-      arch:
-        - x64
-portable:
-  artifactName: ${name}-${version}-portable.${ext}
-  requestExecutionLevel: admin
 nsis:
-  artifactName: ${name}-${version}-setup.${ext}
-  shortcutName: ${productName}
-  uninstallDisplayName: ${productName}
-  createDesktopShortcut: always
-  oneClick: false
-  deleteAppDataOnUninstall: false
-  allowToChangeInstallationDirectory: true
-mac:
-  entitlementsInherit: build/entitlements.mac.plist
-  extendInfo:
-    - NSCameraUsageDescription: Application requests access to the device's camera.
-    - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
-    - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
-    - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
-  notarize: false
-dmg:
-  artifactName: ${name}-${version}.${ext}
-linux:
-  target:
-    - AppImage
-    - snap
-    - deb
-  maintainer: electronjs.org
-  category: Utility
-appImage:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: ${productName}-Setup-${version}.${ext}
+  shortcutName: "سيستم العطور"
+  oneClick: true
+  allowToChangeInstallationDirectory: false
 npmRebuild: false
-publish:
-  provider: github
-  owner: yassen87
-  repo: elator-pos
-  private: false
-  releaseType: release

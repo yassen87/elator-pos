@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo, memo, useCallback } from 'react'
 import {
     ShoppingCart,
     Search,
@@ -13,10 +13,85 @@ import {
     Tag,
     FlaskConical,
     RefreshCw,
-    AlertCircle
+    AlertCircle,
+    MessageCircle,
+    Send,
+    Barcode,
+    Users,
+    Package
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useReactToPrint } from 'react-to-print'
+import { BarcodeSticker, InvoiceSticker } from './BarcodeSticker'
+import { PrintableInvoice } from './views/PrintableInvoice'
+import { printComponent } from '../utils/printHelper'
+
+
+// Memoized product card - only re-renders when item data or onClick changes
+const ProductCard = memo(({ item, onClick }) => {
+    const isOil = item.category === 'oil' || item.category === 'زيت';
+    const isProduct = item.itemType === 'product';
+    const stockVal = isOil
+        ? (Number(item.total_gram) > 0 ? item.total_gram : Number(item.total_ml) > 0 ? item.total_ml : item.stock_quantity)
+        : item.stock_quantity;
+    const stockColor = stockVal === 0 ? 'bg-red-50 text-red-500' : stockVal <= item.min_stock ? 'bg-yellow-50 text-yellow-600' : 'bg-green-50 text-green-600';
+    const dotColor = stockVal === 0 ? 'bg-red-400' : stockVal <= item.min_stock ? 'bg-yellow-400' : 'bg-green-400';
+
+    return (
+        <div
+            onClick={() => onClick(item)}
+            className="bg-white border-2 border-slate-50 p-4 rounded-2xl text-right flex flex-col justify-between h-40 hover:border-brand-primary/20 hover:-translate-y-1 transition-all shadow-sm group relative overflow-hidden cursor-pointer select-none active:scale-95"
+            style={{ contentVisibility: 'auto', containIntrinsicSize: '0 160px' }}
+        >
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-slate-50 to-transparent group-hover:via-brand-primary/20 transition-all" />
+            <div className="flex justify-between items-start">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${isProduct ? 'bg-blue-50 text-blue-500' : 'bg-brand-primary/10 text-brand-primary'}`}>
+                    {isProduct ? <span className="text-base">🏷️</span> : <span className="text-base">🧪</span>}
+                </div>
+                <div className="flex flex-col items-end">
+                    <span className={`px-2 py-0.5 rounded-full text-[8px] uppercase font-black mb-0.5 ${isOil ? 'bg-amber-100 text-amber-600' : (isProduct ? 'bg-blue-100/50 text-blue-600' : 'bg-brand-primary/5 text-brand-primary')}`}>
+                        {isOil ? 'زيت' : (isProduct ? 'منتج' : 'تركيبة')}
+                    </span>
+                    {isProduct && (
+                        <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md font-black text-[8px] ${stockColor}`}>
+                            <div className={`w-1 h-1 rounded-full ${dotColor}`} />
+                            <span>{stockVal ?? 0}</span>
+                        </div>
+                    )}
+                </div>
+            </div>
+            <div>
+                <p className="text-sm font-black text-slate-900 leading-snug line-clamp-2 mb-1">{item.name}</p>
+                {item.barcode && (
+                    <div className="flex items-center gap-1 text-slate-300 mb-1">
+                        <span className="text-[9px] font-mono font-bold tracking-tighter">{item.barcode}</span>
+                    </div>
+                )}
+                {isProduct && (
+                    <div className="flex flex-col items-end gap-0.5">
+                        <div className="flex items-baseline gap-1">
+                            <span className="bg-sky-100 text-sky-700 text-[8px] font-black px-1 py-0.5 rounded-md">ق</span>
+                            <span className="text-sm font-black text-slate-900 leading-none">{item.displayPrice}</span>
+                            <span className="text-[9px] font-bold text-slate-400">ج.م</span>
+                        </div>
+                    </div>
+                )}
+                {item.itemType === 'formula' && (
+                    <div className="flex items-baseline justify-end gap-1.5">
+                        <span className="text-base font-black text-slate-900 leading-none">{item.displayPrice}</span>
+                        <span className="text-[10px] font-bold text-slate-400">ج.م</span>
+                    </div>
+                )}
+            </div>
+            <div className="absolute bottom-3 left-3 translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all">
+                <div className="w-8 h-8 bg-brand-primary text-white rounded-lg shadow-lg shadow-brand-primary/30 flex items-center justify-center">
+                    <span className="text-lg font-bold">+</span>
+                </div>
+            </div>
+        </div>
+    );
+});
+ProductCard.displayName = 'ProductCard';
 
 export default function CashierPanel({ user, onLogout, notify, ask }) {
     const [products, setProducts] = useState([])
@@ -25,16 +100,20 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
     const [cart, setCart] = useState([])
     const [customerName, setCustomerName] = useState('')
     const [customerPhone, setCustomerPhone] = useState('')
+    const [customerAddress, setCustomerAddress] = useState('')
     const [showHistory, setShowHistory] = useState(false)
     const [salesHistory, setSalesHistory] = useState([])
     const [paymentMethod, setPaymentMethod] = useState('cash')
     const [transferType, setTransferType] = useState('vodafone_cash')
+    const [discount, setDiscount] = useState(0)
 
     const [settings, setSettings] = useState({})
+    const [scanBuffer, setScanBuffer] = useState('')
+    const [lastKeyTime, setLastKeyTime] = useState(0)
 
     const [showPreview, setShowPreview] = useState(false)
     const [filter, setFilter] = useState('all')
-    const [oilConfig, setOilConfig] = useState({ show: false, oils: [], price: '', discount: '', bottle: null })
+    const [oilConfig, setOilConfig] = useState({ show: false, oils: [], price: '', discount: '', bottle: null, pricingTier: null })
     const [lastBottle, setLastBottle] = useState(null) // Remember last used bottle
     const [showReturns, setShowReturns] = useState(false)
     const [returnInvoiceId, setReturnInvoiceId] = useState('')
@@ -42,41 +121,91 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
     const [selectedReturnItems, setSelectedReturnItems] = useState([])
     const [returnType, setReturnType] = useState('refund') // 'refund' or 'exchange'
     const [returnReason, setReturnReason] = useState('')
+    const [returnSearchResults, setReturnSearchResults] = useState([])
     const [searchOilTerm, setSearchOilTerm] = useState('') // New search term for formula oils
     const [customersList, setCustomersList] = useState([]) // For autocomplete
     const [printedSaleId, setPrintedSaleId] = useState(null)
     const [printedInvoiceCode, setPrintedInvoiceCode] = useState(null)
     const [sessionInvoiceCode, setSessionInvoiceCode] = useState(null)
-    const [receiptData, setReceiptData] = useState({ items: [], total: 0, invoiceCode: null, saleId: null })
+    const [receiptData, setReceiptData] = useState({ items: [], total: 0, invoiceCode: null, saleId: null, customer_address: '' })
     const [isPrinting, setIsPrinting] = useState(false)
+    const [isPrintingSticker, setIsPrintingSticker] = useState(false)
+    const [itemToChoosePrice, setItemToChoosePrice] = useState(null) // For wholesale/retail choice
+    
+    const pricingMode = settings?.pricing_mode || 'both';
+    const isWholesaleTier = user?.role === 'super' || user?.pricing_tier === 'wholesale';
+
 
     const parseDetails = (details) => {
         if (!details) return '';
         try {
-            const parsed = JSON.parse(details);
-            if (parsed.text) return parsed.text;
-
-            // المحاولة لاسترجاع التفاصيل من الكائنات المحفوظة (للإصدارات القديمة)
-            if (parsed.oils && Array.isArray(parsed.oils)) {
-                const parts = parsed.oils.map(o => {
-                    const name = o.name || products.find(p => p.id === o.id)?.name || 'زيت غير معروف';
-                    return `${name} (${o.quantity} جم)`;
-                });
-
-                let bottleName = '';
-                if (parsed.bottle_id) {
-                    bottleName = products.find(p => p.id === parsed.bottle_id)?.name || 'زجاجة';
+            // Handle both string and object
+            const parsed = typeof details === 'string' ? JSON.parse(details) : details;
+            
+            // If it has a 'text' field (V3 format), use it
+            if (parsed && typeof parsed === 'object') {
+                if ('text' in parsed && 'impact' in parsed) {
+                    return parsed.text || '';
                 }
+                if (parsed.text) return parsed.text;
 
-                return bottleName ? `${bottleName}-${parts.join(' + ')} ` : parts.join(' + ');
+                // Legacy fallback (V2 format with 'oils' array)
+                if (parsed.oils && Array.isArray(parsed.oils)) {
+                    const parts = parsed.oils
+                        .filter(o => o.quantity > 0)
+                        .map(o => o.name || products.find(p => p.id === o.id)?.name || 'زيت غير معروف');
+
+                    let bottleName = '';
+                    if (parsed.bottle_id) {
+                        bottleName = products.find(p => p.id === parsed.bottle_id)?.name || 'زجاجة';
+                    }
+                    return bottleName ? `نوع الزجاجة: ${bottleName}\nالمكونات: ${parts.join(' + ')}` : parts.join(' + ');
+                }
             }
 
-            return '';
+            // If it's just a string or unknown format, return as is
+            return typeof details === 'string' ? details : JSON.stringify(details);
         } catch (e) {
-            return details;
+            return String(details);
         }
     }
+
+    // Helper: safely pick retail vs wholesale price based on product unit
+    const resolvePrice = (product, isWholesale) => {
+        if (!product) return 0;
+        const safeNum = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+        const unit = product.sell_unit;
+        if (isWholesale) {
+            if (unit === 'gram') {
+                const w = safeNum(product.wholesale_price_per_gram);
+                return w > 0 ? w : safeNum(product.price_per_gram);
+            }
+            if (unit === 'ml') {
+                const w = safeNum(product.wholesale_price_per_ml);
+                return w > 0 ? w : safeNum(product.price_per_ml);
+            }
+            // oil category without explicit unit — try wholesale first then retail
+            if (product.category === 'oil' || product.category === 'زيت') {
+                const w = safeNum(product.wholesale_price_per_gram || product.wholesale_price_per_ml || product.wholesale_price);
+                return w > 0 ? w : safeNum(product.price_per_gram || product.price_per_ml || product.price);
+            }
+            // normal product — wholesale_price, fallback to retail price
+            const w = safeNum(product.wholesale_price);
+            return w > 0 ? w : safeNum(product.price ?? product.sell_price);
+        } else {
+            if (unit === 'gram') return safeNum(product.price_per_gram);
+            if (unit === 'ml')   return safeNum(product.price_per_ml);
+            // oil category without explicit unit — try both
+            if (product.category === 'oil' || product.category === 'زيت') {
+                return safeNum(product.price_per_gram || product.price_per_ml || product.price);
+            }
+            return safeNum(product.price ?? product.sell_price);
+        }
+    }
+
+
     const componentRef = useRef()
+
 
     useEffect(() => {
         if (isPrinting && receiptData.items.length > 0) {
@@ -84,6 +213,54 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
             setIsPrinting(false)
         }
     }, [isPrinting, receiptData])
+
+    useEffect(() => {
+        let scannerBuffer = ''
+        let lastKeyTime = 0
+
+        const handleGlobalKeyDown = (e) => {
+            const currentTime = Date.now()
+            if (currentTime - lastKeyTime > 100) scannerBuffer = ''
+            lastKeyTime = currentTime
+
+            if (e.key === 'Enter') {
+                if (scannerBuffer.length > 2) {
+                    let searchCode = scannerBuffer;
+                    if (scannerBuffer.length === 13 && scannerBuffer.startsWith('622')) {
+                        // Extract ID from 622000000001X
+                        searchCode = scannerBuffer.substring(3, 12).replace(/^0+/, '');
+                        if (searchCode === '') searchCode = '0';
+                    }
+
+                    // 1. Try to find product by barcode or ID
+                    const product = products.find(p => p.barcode === scannerBuffer || String(p.id) === searchCode)
+                    if (product) {
+                        addToCart({ ...product, type: 'product' }, true)
+                        notify(`تم إضافة المنتج: ${product.name}`, 'success')
+                        scannerBuffer = ''
+                        return
+                    }
+
+                    // 2. Try to find formula by barcode or ID
+                    const formula = formulas.find(f => f.barcode === scannerBuffer || String(f.id) === searchCode)
+                    if (formula) {
+                        addToCart({ ...formula, type: 'formula' }, true)
+                        notify(`تم إضافة التركيبة: ${formula.name}`, 'success')
+                        scannerBuffer = ''
+                        return
+                    }
+
+                    notify(`كود غير معروف: ${scannerBuffer}`, 'error')
+                }
+                scannerBuffer = ''
+            } else if (e.key.length === 1) {
+                scannerBuffer += e.key
+            }
+        }
+
+        window.addEventListener('keydown', handleGlobalKeyDown)
+        return () => window.removeEventListener('keydown', handleGlobalKeyDown)
+    }, [products, formulas, settings])
 
     useEffect(() => {
         loadData()
@@ -96,7 +273,7 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
         })
 
         return cleanup
-    }, [])
+    }, [products, formulas])
 
     const loadData = async () => {
         const p = await window.api.getProducts()
@@ -122,34 +299,115 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
         }
     }, [showHistory])
 
-    const addToCart = (item, type = 'product') => {
-        const isBottle = item.category?.toLowerCase() === 'bottle' || item.category === 'زجاجة'
-        const isOil = item.category?.toLowerCase() === 'oil' || item.category === 'زيت'
+    // Auto-calculate oil mixture price whenever oils or bottle change
+    useEffect(() => {
+        if (!oilConfig.show || oilConfig.oils.length === 0) return;
+        
+        // Priority: 1. Manual selection in oilConfig, 2. Global shop settings
+        const isWholesale = oilConfig.pricingTier 
+            ? (oilConfig.pricingTier === 'wholesale') 
+            : (pricingMode === 'wholesale' || (pricingMode === 'both' && isWholesaleTier));
 
-        if (isOil && !isBottle) {
-            // Only open mixer modal for raw oils
+        const oilTotal = oilConfig.oils.reduce((sum, o) => {
+            const ml = parseFloat(o.ml) || 0;
+            const perUnit = resolvePrice(o.oil, isWholesale);
+            return sum + (ml * perUnit);
+        }, 0);
+        const bottlePrice = oilConfig.bottle ? parseFloat(resolvePrice(oilConfig.bottle, isWholesale)) || 0 : 0;
+        const total = oilTotal + bottlePrice;
+        if (total > 0) {
+            setOilConfig(prev => ({ ...prev, price: total.toFixed(2) }));
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [oilConfig.oils, oilConfig.bottle, oilConfig.show, oilConfig.pricingTier, pricingMode, isWholesaleTier, settings])
+
+    const addToCart = (product, fromScanner = false) => {
+        const itemType = product.type || product.itemType || 'product';
+
+        // Validation: Stock check for products
+        if (itemType === 'product' && Number(product.stock_quantity || product.total_gram || product.total_ml) <= 0) {
+            notify(`المنتج ${product.name} غير متوفر في المخزون! ❌`, 'error')
+            return
+        }
+
+
+        const isProductType = itemType === 'product' || product.category === 'oil' || product.category === 'زيت';
+
+        // 1. If shop is 'both', and it's a product/oil, we MUST ask the user FIRST (unless scanned or already chosen)
+        if (isProductType && !fromScanner && pricingMode === 'both' && !product.is_choosing_price) {
+            setItemToChoosePrice(product);
+            return;
+        }
+
+        // 2. If it's an oil that needs mixture screen (and it either already chose price, or shop is fixed to retail/wholesale, or was scanned)
+        if ((product.category === 'oil' || product.category === 'زيت')) {
+            const isWholesaleTier = user?.role === 'super' || user?.pricing_tier === 'wholesale';
+            const initialTier = product.is_choosing_price 
+                ? (product.price === resolvePrice(product, true) ? 'wholesale' : 'retail')
+                : (pricingMode === 'wholesale' || (pricingMode === 'both' && isWholesaleTier) ? 'wholesale' : 'retail');
+
             setOilConfig({
                 show: true,
-                oils: [{ oil: item, ml: '' }],
-                bottle: lastBottle,
+                oils: [{ oil: product, ml: '' }],
                 price: '',
-                discount: ''
-            })
-            return
+                discount: '',
+                bottle: lastBottle || null,
+                pricingTier: initialTier
+            });
+            return;
         }
 
-        if (isBottle && Number(item.stock_quantity) <= 0) {
-            console.log('Stock check triggered for bottle:', item.name, 'Stock:', item.stock_quantity)
-            notify(`زجاجة ${item.name} غير متوفرة حالياً في المخزون! ❌`, 'error')
-            return
-        }
+        setCart(prev => {
+            const existing = prev.find(item => item.id === product.id && item.type === product.type)
+            if (existing) {
+                return prev.map(item => item.id === product.id && item.type === product.type
+                    ? { ...item, qty: item.qty + 1 }
+                    : item
+                )
+            }
 
-        // ... بقية منطق الإضافة العادي سيتم التعامل معه في دالة منفصلة للمنتجات العادية
-        proceedAddToCart(item, type)
+            // Default price determination for standard products
+            let price = 0
+            if (product.type === 'formula') {
+                price = product.total_price || 0
+            } else {
+                const isGram = product.sell_unit === 'gram' || product.category === 'oil' || product.category === 'زيت'
+                const isMl = product.sell_unit === 'ml'
+                
+
+                
+                // Prioritize explicit modal choice if available
+                if (product.is_choosing_price && product.price !== undefined) {
+                    price = product.price;
+                }
+                // Check if shop forces wholesale, OR shop allows both but user is wholesale explicitly
+                else if (pricingMode === 'wholesale' || (pricingMode === 'both' && isWholesaleTier)) {
+                    price = resolvePrice(product, true);
+                    
+                    // Note: If shop relies on wholesale but product has no wholesale explicitly set (evals to 0), 
+                    // we DO NOT fallback to retail. We respect their 0.
+                } else {
+                    // Retail fallback
+                    price = resolvePrice(product, false);
+                }
+            }
+
+            return [...prev, {
+                id: product.id,
+                name: product.name,
+                price: price,
+                qty: 1,
+                type: itemType,
+                itemType: itemType,
+                category: product.category,
+                barcode: product.barcode,
+                discount: 0
+            }]
+        })
     }
 
     const proceedAddToCart = (item, type, customPrice = null, ml = null, bottleId = null) => {
-        const finalPrice = customPrice !== null ? parseFloat(customPrice) : (item.price || item.total_price || 0)
+        const finalPrice = customPrice !== null ? parseFloat(customPrice) : (item.sell_price ?? item.price ?? item.total_price ?? 0)
 
         const cartItem = {
             ...item,
@@ -211,7 +469,6 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                         return c
                     }
                 }
-
                 return { ...c, qty: newQty }
             }
             return c
@@ -222,11 +479,186 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
         setCart(cart.filter(c => !(c.id === id && c.type === type)))
     }
 
-    const total = cart.reduce((acc, item) => acc + ((parseFloat(item.price) || parseFloat(item.total_price) || 0) * item.qty), 0)
+    // total = sum of each item's net price (after item-level discount) * qty
+    const itemsSubtotal = cart.reduce((acc, item) => acc + ((parseFloat(item.price) || 0) * item.qty), 0)
+    const itemsDiscount = cart.reduce((acc, item) => {
+        const price = parseFloat(item.price) || 0;
+        const discountPercent = parseFloat(item.discount) || 0;
+        const discountAmount = price * (discountPercent/100);
+        return acc + (discountAmount * item.qty);
+    }, 0)
+    const total = itemsSubtotal - itemsDiscount
 
-    const handlePrint = useReactToPrint({
-        contentRef: componentRef,
-    })
+    // Memoize the cart data for printing to avoid expensive re-mapping on every single render
+    const memoizedPrintCart = useMemo(() => {
+        const sourceItems = receiptData.items.length > 0 ? receiptData.items : cart;
+        return sourceItems.map(item => ({
+            name: item.item_name || item.name || 'منتج',
+            qty: item.quantity || item.qty || 1,
+            price: item.price || 0,
+            barcode: item.barcode || '',
+            category: item.category || '',
+            is_ml: item.is_ml || false,
+            is_gram: item.is_gram || false,
+            details: item.details || '',
+        }));
+    }, [cart, receiptData.items]);
+
+    const handlePrint = async () => {
+        if (!receiptData.items?.length) return;
+        try {
+            await printComponent(PrintableInvoice, {
+                sale: receiptData,
+                settings: settings,
+                parseDetails: parseDetails
+            }, { width: '80mm' });
+        } catch (err) {
+            console.error('Invoice Print Error:', err);
+            notify('حدث خطأ أثناء طباعة الفاتورة', 'error');
+        }
+    };
+
+    const handleReprintInvoice = async (sale) => {
+        try {
+            await printComponent(PrintableInvoice, {
+                sale: sale,
+                settings: settings,
+                parseDetails: parseDetails
+            }, { width: '80mm' });
+            notify('تم إعادة طباعة الفاتورة بنجاح', 'success');
+        } catch (err) {
+            console.error('Reprint Invoice Error:', err);
+            notify('حدث خطأ أثناء إعادة طباعة الفاتورة', 'error');
+        }
+    };
+
+    const handleReprintSticker = async (sale) => {
+        try {
+            const isTwin = settings.sticker_type === 'twin' || settings.sticker_type === 'twin_35x25';
+            const isCompact = settings.sticker_type === 'compact';
+            const isPharmacy = settings.sticker_type === 'pharmacy';
+
+            let w = '50mm', h = '30mm';
+            if (settings.sticker_type === 'twin_35x25' || settings.sticker_type === 'standard_35x25') { w = '35mm'; h = '25mm'; }
+            else if (isTwin) { w = '38mm'; h = '25mm'; }
+            else if (isCompact) { h = '16mm'; }
+            else if (isPharmacy) { w = '38mm'; h = '12.5mm'; }
+
+            const reprintCart = sale.items.map(item => ({
+                name: item.item_name || item.name || 'منتج',
+                qty: item.quantity || 1,
+                price: item.price || 0,
+                barcode: item.barcode || '',
+                category: item.category || '',
+                is_ml: item.is_ml || false,
+                is_gram: item.is_gram || false,
+                details: item.details || '',
+            }));
+
+            await printComponent(InvoiceSticker, {
+                cart: reprintCart,
+                total: sale.total,
+                customerName: sale.customer_name || '',
+                settings: settings
+            }, { width: w, height: h });
+            notify('تم إعادة طباعة الاستيكر بنجاح', 'success');
+        } catch (err) {
+            console.error('Reprint Sticker Error:', err);
+            notify('حدث خطأ أثناء إعادة طباعة الاستيكر', 'error');
+        }
+    };
+
+    const handleStickerPrint = async () => {
+        try {
+            const isTwin = settings.sticker_type === 'twin' || settings.sticker_type === 'twin_35x25';
+            const isCompact = settings.sticker_type === 'compact';
+            const isPharmacy = settings.sticker_type === 'pharmacy';
+
+            let w = '50mm', h = '30mm';
+            if (settings.sticker_type === 'twin_35x25' || settings.sticker_type === 'standard_35x25') { w = '35mm'; h = '25mm'; }
+            else if (isTwin) { w = '38mm'; h = '25mm'; }
+            else if (isCompact) { h = '16mm'; }
+            else if (isPharmacy) { w = '38mm'; h = '12.5mm'; }
+
+            await printComponent(InvoiceSticker, {
+                cart: memoizedPrintCart,
+                total: receiptData.total || total,
+                customerName: customerName || '',
+                settings: settings
+            }, { width: w, height: h });
+        } catch (err) {
+            console.error('Sticker Print Error:', err);
+            notify('حدث خطأ أثناء طباعة الاستيكر', 'error');
+        }
+    };
+
+    const unifySaleItems = (items) => {
+        if (!items || !Array.isArray(items)) return [];
+        const unified = [];
+        const processed = new Set();
+        const bottleIndices = new Set();
+        const oilIndices = new Set();
+
+        items.forEach((item, idx) => {
+            const itemName = (item.item_name || item.name || '').toLowerCase();
+            const itemDetails = typeof item.details === 'string' ? item.details : JSON.stringify(item.details || {});
+
+            const isBottle = item.category === 'bottle' || item.category === 'زجاجة' ||
+                itemName.includes('زجاجة') || itemName.includes('زجاجه');
+            const isOil = item.type === 'oil_mix' || itemName.includes('تركيبة') ||
+                itemDetails.includes('المكونات:') || (item.formula_id !== null && item.formula_id !== undefined);
+
+            if (isBottle) bottleIndices.add(idx);
+            else if (isOil) oilIndices.add(idx);
+        });
+
+        // Match oils with bottles
+        items.forEach((item, idx) => {
+            if (processed.has(idx)) return;
+            if (oilIndices.has(idx)) {
+                let foundBottleIdx = -1;
+                const iDetailsRaw = item.details ? (typeof item.details === 'string' ? item.details : JSON.stringify(item.details)) : '';
+
+                for (const bIdx of bottleIndices) {
+                    if (processed.has(bIdx)) continue;
+                    const bottle = items[bIdx];
+                    const bName = bottle.item_name || bottle.name || '';
+
+                    // Match by text in details OR by mixture linkage
+                    const textMatch = bName && iDetailsRaw.includes(bName);
+                    const linkMatch = (item.bottle_id && item.bottle_id === bottle.product_id);
+
+                    if (textMatch || linkMatch) {
+                        foundBottleIdx = bIdx;
+                        break;
+                    }
+                }
+
+                if (foundBottleIdx !== -1) {
+                    const bottle = items[foundBottleIdx];
+                    processed.add(foundBottleIdx);
+                    unified.push({
+                        ...item,
+                        item_name: 'تركيبة عطور',
+                        bottle_name: bottle.name || bottle.item_name || '', // Save bottle name
+                        price: (parseFloat(item.price) || 0) + (parseFloat(bottle.price) || 0),
+                        original_indices: [idx, foundBottleIdx],
+                        isUnified: true
+                    });
+                } else {
+                    unified.push({ ...item, original_indices: [idx] });
+                }
+                processed.add(idx);
+            }
+        });
+
+        // Add remaining
+        items.forEach((item, idx) => {
+            if (!processed.has(idx)) unified.push({ ...item, original_indices: [idx] });
+        });
+
+        return unified;
+    }
 
     const handleConfirmSale = async () => {
         if (cart.length === 0) return
@@ -252,16 +684,17 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
         }
         // Snapshot current cart for printing
         const snapshotItems = cart.map(c => ({
-            name: c.name,
-            price: c.price || c.total_price,
+            item_name: c.name,
+            price: parseFloat(c.price) || 0,
             quantity: c.qty,
-            description: c.description || '',
+            details: c.description || '',
             discount: c.discount || 0
         }))
-        const snapshotTotal = total
+        const snapshotTotal = total // already accounts for item discounts
 
         const result = await window.api.addSale({
-            total,
+            total: total,
+            discount: itemsDiscount,
             cashier_id: user.id,
             customer_name: customerName,
             customer_phone: customerPhone,
@@ -270,7 +703,7 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
             payment_details: paymentMethod === 'transfer' ? transferType : '',
             items: cart.map(c => ({
                 name: c.name,
-                price: c.price || c.total_price,
+                price: (parseFloat(c.price) || 0) - (parseFloat(c.discount) || 0),
                 quantity: c.qty,
                 product_id: c.type === 'product' ? c.id : null,
                 formula_id: c.type === 'formula' ? c.id : null,
@@ -286,48 +719,80 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
             setReceiptData({
                 items: snapshotItems,
                 total: snapshotTotal,
-                invoiceCode: result.invoiceCode,
-                saleId: result.id
+                discount: itemsDiscount,
+                invoice_code: result.invoiceCode,
+                saleId: result.id,
+                date: new Date().toISOString().split('T')[0], // For PrintableInvoice expectations
+                cashier_name: user.username,
+                customer_name: customerName,
+                customer_phone: customerPhone,
+                customer_address: customerAddress
             })
             setIsPrinting(true)
-            notify(`تمت العملية بنجاح! رقم الفاتورة: ${result.invoiceCode} `, 'success')
+            const phoneDigits = (customerPhone || '').replace(/\D/g, '')
+            const waNote = phoneDigits.length >= 10 ? ' تم فتح واتساب ومجلد الفاتورة — أرفق PDF وأرسله للعميل.' : ''
+            notify(`تمت العملية بنجاح! رقم الفاتورة: ${result.invoiceCode}${waNote}`, 'success')
         }
 
         setShowPreview(false)
         setCart([])
         setCustomerName('')
         setCustomerPhone('')
-        loadData()
+        setCustomerAddress('')
+        await loadSalesHistory() // Explicitly refresh history immediately
+        await loadData() // Refresh stock
     }
 
     // Returns functions
     const handleLookupInvoice = async () => {
         let cleanId = returnInvoiceId.trim().replace('#', '')
-
-        // Convert Arabic numbers to English if any
         const arabicNumbers = [/٠/g, /١/g, /٢/g, /٣/g, /٤/g, /٥/g, /٦/g, /٧/g, /٨/g, /٩/g]
-        arabicNumbers.forEach((r, i) => {
-            cleanId = cleanId.replace(r, i)
-        })
+        arabicNumbers.forEach((r, i) => { cleanId = cleanId.replace(r, i) })
 
         if (!cleanId) {
-            notify('من فضلك أدخل رقم العملية', 'error')
+            notify('من فضلك أدخل رقم العملية أو اسم العميل', 'error')
             return
         }
 
-        console.log('[DEBUG] Looking up sale identifier:', cleanId)
+        // Check if it's likely a name/phone or an ID
+        const isNumeric = /^\d+$/.test(cleanId)
+
+        if (!isNumeric && cleanId.length > 0) {
+            const results = await window.api.findSalesByCustomer(cleanId)
+            if (!results || results.length === 0) {
+                notify(`لم يتم العثور على مبيعات للعميل: ${cleanId}`, 'error')
+                return
+            }
+            if (results.length === 1) {
+                const sale = await window.api.findSaleById(results[0].id)
+                handleSetReturnSale(sale)
+            } else {
+                setReturnSearchResults(results)
+            }
+            return
+        }
+
+        // If numeric, it's an ID or invoice_code
         const sale = await window.api.findSaleById(cleanId)
         if (!sale) {
-            notify(`لم يتم العثور على فاتورة رقم ${returnInvoiceId} `, 'error')
+            notify(`لم يتم العثور على فاتورة رقم ${returnInvoiceId}`, 'error')
             return
         }
 
+        handleSetReturnSale(sale)
+    }
+
+    const handleSetReturnSale = (sale) => {
+        // Apply unification to return items
+        const unifiedItems = unifySaleItems(sale.items);
         setReturnSale(sale)
-        setSelectedReturnItems(sale.items.map(item => ({
+        setReturnSearchResults([])
+        setSelectedReturnItems(unifiedItems.map(item => ({
             ...item,
             returnQty: 0,
             selected: false,
-            maxReturnQty: item.remaining_quantity || 0
+            // If unified, max quantity is the oil's quantity (assuming 1:1 pairing)
+            maxReturnQty: item.remaining_quantity || item.quantity || 0
         })))
     }
 
@@ -335,7 +800,6 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
         const newItems = [...selectedReturnItems]
         const item = newItems[index]
 
-        // Don't allow selection if fully returned
         if (item.remaining_quantity <= 0) {
             notify('هذا المنتج تم إرجاعه بالكامل', 'error')
             return
@@ -343,7 +807,7 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
 
         newItems[index].selected = !newItems[index].selected
         if (newItems[index].selected) {
-            newItems[index].returnQty = newItems[index].remaining_quantity || newItems[index].quantity
+            newItems[index].returnQty = item.remaining_quantity || item.quantity
         } else {
             newItems[index].returnQty = 0
         }
@@ -352,15 +816,37 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
 
     const handleProcessReturn = async () => {
         const itemsToReturn = selectedReturnItems.filter(i => i.selected && i.returnQty > 0)
-
         if (itemsToReturn.length === 0) {
             notify('من فضلك اختر على الأقل منتج واحد للإرجاع', 'error')
             return
         }
 
-
-
         const totalRefund = itemsToReturn.reduce((sum, item) => sum + (item.price * item.returnQty), 0)
+
+        const expandedItemsToReturn = [];
+        itemsToReturn.forEach(item => {
+            if (item.isUnified && item.original_indices) {
+                // Return both components if unified
+                item.original_indices.forEach(idx => {
+                    const originalItem = returnSale.items[idx];
+                    expandedItemsToReturn.push({
+                        product_id: originalItem.product_id,
+                        item_name: originalItem.item_name || originalItem.name,
+                        quantity: item.returnQty, // Same quantity for both parts of mixture
+                        refund_amount: (originalItem.price / (item.price || 1)) * (item.price * item.returnQty), // Split refund relative to price
+                        details: originalItem.details // FIX: Pass original details through
+                    });
+                });
+            } else {
+                expandedItemsToReturn.push({
+                    product_id: item.product_id,
+                    item_name: item.item_name || item.name,
+                    quantity: item.returnQty,
+                    refund_amount: item.price * item.returnQty,
+                    details: item.details // FIX: Pass original details through
+                });
+            }
+        });
 
         const returnData = {
             original_sale_id: returnSale.id,
@@ -370,38 +856,69 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
             customer_phone: returnSale.customer_phone || '',
             reason: returnReason,
             total_refund: totalRefund,
-            notes: '',
-            items: itemsToReturn.map(item => {
-                const product = products.find(p => p.name === item.item_name)
-                return {
-                    product_id: product ? product.id : null,
-                    item_name: item.item_name,
-                    quantity: item.returnQty,
-                    refund_amount: item.price * item.returnQty
-                }
-            })
+            items: expandedItemsToReturn
         }
 
         const result = await window.api.addReturn(returnData)
-
         if (result.success) {
-            notify(`تم تسجيل ${returnType === 'refund' ? 'استرجاع' : 'استبدال'} بنجاح! المبلغ: ${totalRefund.toFixed(2)} ج.م`, 'success')
+            notify(`تم تسجيل ${returnType === 'refund' ? 'استرجاع' : 'استبدال'} بنجاح!`, 'success')
             setShowReturns(false)
             setReturnInvoiceId('')
             setReturnSale(null)
             setSelectedReturnItems([])
-            setReturnType('refund')
-            setReturnReason('')
             loadData()
         } else {
             notify('حدث خطأ أثناء معالجة الإرجاع', 'error')
         }
     }
 
-    const filteredItems = [
+
+
+    const getDisplayPrice = (i) => {
+        if (i.itemType === 'formula') return i.total_price || 0;
+
+        if (pricingMode === 'wholesale' || (pricingMode === 'both' && isWholesaleTier)) {
+            return resolvePrice(i, true);
+        } else {
+            return resolvePrice(i, false);
+        }
+    };
+
+    // Handle barcode scanner input (fast typing detection)
+    const handleSearchChange = async (e) => {
+        const val = e.target.value;
+        setSearchTerm(val);
+
+        const now = Date.now();
+        // Barcode scanners type very fast (< 50ms per char) and end with Enter
+        // We detect: numeric string >= 6 chars that was typed instantly
+        if (/^\d{6,}$/.test(val.trim())) {
+            // Likely a barcode scan — look up product directly
+            const found = await window.api.findProductByBarcode(val.trim());
+            if (found) {
+                setSearchTerm('');
+                addToCart({ ...found, itemType: 'product' }, true);
+                notify(`تمت إضافة ${found.name} ✅`, 'success');
+            } else {
+                notify(`الباركود "${val.trim()}" غير معروف في النظام ❌`, 'error');
+                setTimeout(() => setSearchTerm(''), 1500);
+            }
+        }
+    };
+
+    const filteredItems = useMemo(() => [
         ...(filter === 'all' || filter === 'product' ? products.map(p => ({ ...p, itemType: 'product' })) : []),
         ...(filter === 'all' || filter === 'formula' ? formulas.map(f => ({ ...f, itemType: 'formula' })) : [])
-    ].filter(i => i.name.toLowerCase().includes(searchTerm.toLowerCase()))
+    ].filter(i => {
+        if (!searchTerm) return true;
+        const term = searchTerm.toLowerCase();
+        return (
+            (i.name || '').toLowerCase().includes(term) ||
+            (i.barcode || '').includes(term)
+        );
+    })
+        .map(i => ({ ...i, displayPrice: getDisplayPrice(i) }))
+    , [products, formulas, filter, searchTerm, pricingMode, isWholesaleTier])
 
     return (
         <div className="flex h-screen bg-slate-50 text-slate-900 overflow-hidden font-noto">
@@ -412,8 +929,23 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                         <Search className="absolute right-5 top-4 w-6 h-6 text-slate-400 group-focus-within:text-brand-primary transition-colors" />
                         <input
                             value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            placeholder="ابحث عن العطر المفضل أو التركيبة..."
+                            onChange={handleSearchChange}
+                            onKeyDown={async (e) => {
+                                if (e.key === 'Enter' && searchTerm.trim()) {
+                                    e.preventDefault();
+                                    const code = searchTerm.trim();
+                                    const found = await window.api.findProductByBarcode(code);
+                                    if (found) {
+                                        setSearchTerm('');
+                                        addToCart({ ...found, itemType: 'product' }, true);
+                                        notify(`تمت إضافة ${found.name} ✅`, 'success');
+                                    } else if (/^\d{4,}$/.test(code)) {
+                                        notify(`الباركود "${code}" غير معروف ❌`, 'error');
+                                        setTimeout(() => setSearchTerm(''), 1500);
+                                    }
+                                }
+                            }}
+                            placeholder="ابحث عن العطر المفضل أو التركيبة... أو اسكان باركود"
                             className="w-full bg-white border-2 border-slate-100 rounded-[2rem] py-4 pr-14 pl-6 focus:ring-4 focus:ring-brand-primary/10 focus:border-brand-primary outline-none transition-all shadow-sm text-lg font-bold placeholder:text-slate-300"
                         />
                     </div>
@@ -456,51 +988,11 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
 
                 <div className="flex-1 overflow-auto pr-2 grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 content-start pb-10">
                     {filteredItems.map(item => (
-                        <motion.button
-                            whileHover={{ y: -4, shadow: "0 15px 30px -8px rgba(0, 0, 0, 0.08)" }}
-                            whileTap={{ scale: 0.96 }}
-                            key={`${item.itemType} -${item.id} `}
-                            onClick={() => addToCart(item, item.itemType)}
-                            className="bg-white border-2 border-slate-50 p-4 rounded-2xl text-right flex flex-col justify-between h-40 hover:border-brand-primary/20 transition-all shadow-sm group relative overflow-hidden"
-                        >
-                            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-slate-50 to-transparent group-hover:via-brand-primary/20 transition-all"></div>
-
-                            <div className="flex justify-between items-start">
-                                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${item.itemType === 'product' ? 'bg-blue-50 text-blue-500' : 'bg-brand-primary/10 text-brand-primary'} `}>
-                                    {item.itemType === 'product' ? <Tag className="w-5 h-5" /> : <FlaskConical className="w-5 h-5" />}
-                                </div>
-                                <div className="flex flex-col items-end">
-                                    <span className={`px-2 py-0.5 rounded-full text-[8px] uppercase font-black mb-0.5 ${item.itemType === 'product' ? 'bg-blue-100/50 text-blue-600' : 'bg-brand-primary/5 text-brand-primary'} `}>
-                                        {item.itemType === 'product' ? 'منتج' : 'تركيبة'}
-                                    </span>
-                                    {item.itemType === 'product' && (
-                                        <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md font-black text-[8px] ${item.stock_quantity === 0
-                                            ? 'bg-red-50 text-red-500'
-                                            : item.stock_quantity <= item.min_stock
-                                                ? 'bg-yellow-50 text-yellow-600'
-                                                : 'bg-green-50 text-green-600'
-                                            } `}>
-                                            <div className={`w-1 h-1 rounded-full ${item.stock_quantity === 0 ? 'bg-red-500' : item.stock_quantity <= item.min_stock ? 'bg-yellow-500' : 'bg-green-500'} `}></div>
-                                            {item.stock_quantity === 0 ? 'نفد' : `${item.stock_quantity} `}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            <div className="mt-2">
-                                <h3 className="font-black text-slate-800 text-sm truncate mb-0.5 leading-tight group-hover:text-brand-primary transition-colors">{item.name}</h3>
-                                <div className="flex items-baseline gap-1">
-                                    <span className="text-lg font-black text-slate-900 leading-none">{item.price || item.total_price}</span>
-                                    <span className="text-[10px] font-bold text-slate-400">ج.م</span>
-                                </div>
-                            </div>
-
-                            <div className="absolute bottom-3 left-3 translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all">
-                                <div className="w-8 h-8 bg-brand-primary text-white rounded-lg shadow-lg shadow-brand-primary/30 flex items-center justify-center">
-                                    <Plus className="w-4 h-4" />
-                                </div>
-                            </div>
-                        </motion.button>
+                        <ProductCard
+                            key={`${item.itemType}-${item.id}`}
+                            item={item}
+                            onClick={addToCart}
+                        />
                     ))}
                 </div>
             </div>
@@ -571,9 +1063,12 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="text-right">
-                                        <span className="text-brand-primary font-black text-lg leading-none block mb-1">{(item.price || item.total_price || 0) * item.qty}</span>
-                                        <span className="text-[9px] font-bold text-slate-400 uppercase">ج.م</span>
+                                    <div className="text-left">
+                                        {item.discount > 0 && (
+                                            <span className="text-slate-300 line-through text-xs block text-right">{((item.price ?? item.total_price ?? 0) * item.qty).toFixed(2)}</span>
+                                        )}
+                                        <span className="text-brand-primary font-black text-lg leading-none block mb-1">{(((item.price ?? item.total_price ?? 0) - (item.discount || 0)) * item.qty).toFixed(2)}</span>
+                                        <span className="text-[8px] font-bold text-slate-400 uppercase">ج.م</span>
                                     </div>
                                 </div>
                                 <div className="flex items-center justify-between">
@@ -600,12 +1095,13 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                     )}
                 </div>
 
-                <footer className="p-6 bg-slate-50/80 backdrop-blur-md border-t-2 border-slate-100 space-y-4">
-                    <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm space-y-4">
-                        <div className="grid grid-cols-2 gap-3">
-                            <div className="space-y-1.5">
-                                <label className="text-[9px] text-slate-400 mr-2 uppercase font-black tracking-widest">اسم العميل</label>
-                                <div className="relative">
+                <footer className="bg-white border-t-2 border-slate-100 p-4 shadow-[0_-4px_20px_rgba(0,0,0,0.03)]">
+                    <div className="max-w-4xl mx-auto space-y-4">
+                        {/* Customer Info - 2+1 Layout */}
+                        <div className="space-y-3">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-slate-400 font-bold uppercase pr-1">اسم العميل</label>
                                     <input
                                         value={customerName}
                                         list="customers-datalist"
@@ -615,10 +1111,14 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                             const customer = customersList.find(c => c.customer_name === value)
                                             if (customer) {
                                                 setCustomerPhone(customer.customer_phone || '')
+                                                setCustomerAddress(customer.customer_address || '')
+                                            } else {
+                                                setCustomerPhone('')
+                                                setCustomerAddress('')
                                             }
                                         }}
-                                        className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2.5 px-3 text-xs font-black outline-none focus:ring-4 focus:ring-brand-primary/10 transition-all placeholder:text-slate-200"
-                                        placeholder="اسم العميل"
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-4 text-xs font-black focus:ring-2 focus:ring-brand-primary/20 outline-none transition-all"
+                                        placeholder="ادخل الاسم..."
                                     />
                                     <datalist id="customers-datalist">
                                         {customersList.map((customer, idx) => (
@@ -626,61 +1126,83 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                         ))}
                                     </datalist>
                                 </div>
-                            </div>
-                            <div className="space-y-1.5">
-                                <label className="text-[9px] text-slate-400 mr-2 uppercase font-black tracking-widest">الموبايل</label>
-                                <div className="relative">
+
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-slate-400 font-bold uppercase pr-1">رقم الموبايل</label>
                                     <input
                                         value={customerPhone}
                                         onChange={(e) => setCustomerPhone(e.target.value)}
-                                        className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2.5 px-3 text-xs font-black outline-none focus:ring-4 focus:ring-brand-primary/10 transition-all placeholder:text-slate-200"
-                                        placeholder="01xxx..."
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-4 text-xs font-black focus:ring-2 focus:ring-brand-primary/20 outline-none transition-all"
+                                        placeholder="01xxxxxxxxx"
                                     />
                                 </div>
                             </div>
-                        </div>
 
-                        <div className="flex justify-between items-center py-1 border-t border-slate-50">
-                            <div>
-                                <span className="text-slate-400 font-black text-[10px] uppercase tracking-wider block">الإجمالي المستحق</span>
-                                <div className="flex items-baseline gap-1.5">
-                                    <span className="text-4xl font-black text-slate-900 leading-none tracking-tighter">{total}</span>
-                                    <span className="text-sm font-black text-brand-primary uppercase">ج.م</span>
-                                </div>
+                            <div className="space-y-1">
+                                <label className="text-[10px] text-slate-400 font-bold uppercase pr-1">العنوان</label>
+                                <input
+                                    value={customerAddress}
+                                    onChange={(e) => setCustomerAddress(e.target.value)}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-4 text-xs font-black focus:ring-2 focus:ring-brand-primary/20 outline-none transition-all"
+                                    placeholder="العنوان (اختياري)"
+                                />
                             </div>
                         </div>
-                    </div>
 
-                    <button
-                        onClick={async () => {
-                            if (cart.length === 0) return
-                            try {
-                                const nextCode = await window.api.getNextInvoiceCode()
-                                setSessionInvoiceCode(nextCode)
-                                setReceiptData(prev => ({
-                                    ...prev,
-                                    invoiceCode: nextCode,
-                                    items: cart.map(c => ({
-                                        name: c.name,
-                                        price: c.price || c.total_price,
-                                        quantity: c.qty,
-                                        description: c.description || '',
-                                        discount: c.discount || 0
-                                    }))
-                                }))
-                                setShowPreview(true)
-                            } catch (error) {
-                                console.error('Error fetching next code:', error)
-                                setShowPreview(true)
-                            }
-                        }}
-                        disabled={cart.length === 0}
-                        className="w-full bg-slate-900 hover:bg-black text-white font-black py-4 rounded-[1.8rem] flex items-center justify-center gap-3 shadow-xl shadow-slate-900/40 disabled:opacity-20 disabled:shadow-none transition-all active:scale-[0.98] group overflow-hidden relative"
-                    >
-                        <div className="absolute inset-0 bg-gradient-to-r from-brand-primary to-brand-secondary opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <Printer className="w-5 h-5 z-10 group-hover:rotate-12 transition-transform" />
-                        <span className="text-lg z-10">إصدار الفاتورة</span>
-                    </button>
+                        {/* Bottom Bar - Totals & Action */}
+                        <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+                            <div className="flex items-center gap-8">
+                                <div className="text-right">
+                                    <span className="text-slate-400 font-bold text-[10px] uppercase block mb-1">الإجمالي النهائي</span>
+                                    <div className="flex items-baseline gap-1.5">
+                                        <span className="text-4xl font-black text-slate-900 leading-none">{total.toFixed(2)}</span>
+                                        <span className="text-xs font-black text-brand-primary bg-brand-primary/5 px-2 py-0.5 rounded-lg">ج.م</span>
+                                    </div>
+                                </div>
+                                {itemsDiscount > 0 && (
+                                    <div className="text-right border-r border-slate-100 pr-6">
+                                        <div className="text-[9px] text-slate-400 font-bold mb-0.5">قبل الخصم: {itemsSubtotal.toFixed(2)}</div>
+                                        <div className="text-sm font-black text-emerald-500">خصم: -{itemsDiscount.toFixed(2)}</div>
+                                    </div>
+                                )}
+                            </div>
+
+                            <button
+                                onClick={async () => {
+                                    if (cart.length === 0) return
+                                    try {
+                                        const nextCode = await window.api.getNextInvoiceCode()
+                                        setSessionInvoiceCode(nextCode)
+                                        setReceiptData(prev => ({
+                                            ...prev,
+                                            invoiceCode: nextCode,
+                                            discount: itemsDiscount,
+                                            customer_name: customerName,
+                                            customer_phone: customerPhone,
+                                            customer_address: customerAddress,
+                                            items: cart.map(c => ({
+                                                name: c.name,
+                                                price: (parseFloat(c.price) || 0) * (1 - (parseFloat(c.discount) || 0) / 100),
+                                                quantity: c.qty,
+                                                description: c.description || '',
+                                                discount: c.discount || 0,
+                                                discount_percent: c.discount || 0
+                                            }))
+                                        }))
+                                        setShowPreview(true)
+                                    } catch (error) {
+                                        console.error('Error fetching next code:', error)
+                                        setShowPreview(true)
+                                    }
+                                }}
+                                disabled={cart.length === 0}
+                                className="bg-slate-900 hover:bg-black text-white font-black py-2.5 px-6 rounded-xl flex items-center gap-2 shadow-lg shadow-slate-900/10 disabled:opacity-20 transition-all active:scale-[0.95]"
+                            >
+                                <Printer className="w-4 h-4 text-brand-primary" />
+                                <span className="text-sm">إصدار الفاتورة</span>
+                            </button>
+                        </div>
+                    </div>
                 </footer>
             </div>
 
@@ -713,50 +1235,59 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                 {/* Bottle Selection */}
                                 <div className="space-y-2">
                                     <div className="flex gap-2 mb-2">
-                                        {[35, 55, 110].map(size => {
-                                            const bottleForSize = products.find(p =>
-                                                (p.category?.toLowerCase() === 'bottle' || p.category === 'زجاجة') &&
-                                                (p.name.includes(size.toString()) || p.name.includes(size === 35 ? '٣٥' : size === 55 ? '٥٥' : '١١٠'))
-                                            )
+                                        {(() => {
+                                            // Use top_bottles_ids from settings if available, otherwise fall back to quick-size match
+                                            let quickBottles = []
+                                            try {
+                                                const topIds = JSON.parse(settings.top_bottles_ids || '[]')
+                                                if (Array.isArray(topIds) && topIds.length > 0) {
+                                                    quickBottles = topIds
+                                                        .map(id => products.find(p => p.id === id))
+                                                        .filter(Boolean)
+                                                }
+                                            } catch (e) { }
 
-                                            const isNotFound = !bottleForSize
-                                            const isOutOfStock = bottleForSize && Number(bottleForSize.stock_quantity) <= 0
-                                            const isSelected = oilConfig.bottle?.id === bottleForSize?.id && bottleForSize !== undefined
+                                            // Fallback: find bottles by common sizes
+                                            if (quickBottles.length === 0) {
+                                                quickBottles = products.filter(p =>
+                                                    (p.category?.toLowerCase() === 'bottle' || p.category === 'زجاجة')
+                                                ).slice(0, 3)
+                                            }
 
-                                            return (
-                                                <button
-                                                    key={size}
-                                                    onClick={() => {
-                                                        if (isNotFound) {
-                                                            notify(`حجم الزجاجة ${size} مل غير مسجل في النظام! ⚠️`, 'warning')
-                                                            return
-                                                        }
-                                                        if (isOutOfStock) {
-                                                            notify(`زجاجة ${bottleForSize.name} نافدة من المخزون! ❌`, 'error')
-                                                            return
-                                                        }
+                                            return quickBottles.map(bottleForSize => {
+                                                const isOutOfStock = Number(bottleForSize.stock_quantity) <= 0
+                                                const isSelected = oilConfig.bottle?.id === bottleForSize?.id
 
-                                                        setOilConfig({ ...oilConfig, bottle: bottleForSize })
-                                                        setLastBottle(bottleForSize)
-                                                    }}
-                                                    className={`flex-1 py-3 rounded-2xl text-lg font-black transition-all shadow-sm border-2 flex flex-col items-center justify-center gap-0 ${isSelected && !isOutOfStock
-                                                        ? 'bg-brand-primary text-white border-brand-primary shadow-brand-primary/20 scale-105'
-                                                        : isOutOfStock || isNotFound
-                                                            ? 'bg-red-50 text-red-500 border-red-200 opacity-90'
-                                                            : 'bg-white text-slate-600 border-slate-100 hover:border-brand-primary/50 hover:bg-slate-50'
-                                                        } `}
-                                                >
-                                                    <span className="flex items-center gap-1">
-                                                        {size} مل
-                                                        {isSelected && !isOutOfStock && <span>✔</span>}
-                                                        {(isOutOfStock || isNotFound) && <span>❌</span>}
-                                                    </span>
-                                                    <span className="text-[9px] font-bold opacity-70">
-                                                        {isNotFound ? 'غير مسجل' : isOutOfStock ? 'نفد' : `متاح: ${bottleForSize.stock_quantity} `}
-                                                    </span>
-                                                </button>
-                                            )
-                                        })}
+                                                return (
+                                                    <button
+                                                        key={bottleForSize.id}
+                                                        onClick={() => {
+                                                            if (isOutOfStock) {
+                                                                notify(`زجاجة ${bottleForSize.name} نافدة من المخزون! ❌`, 'error')
+                                                                return
+                                                            }
+                                                            setOilConfig({ ...oilConfig, bottle: bottleForSize })
+                                                            setLastBottle(bottleForSize)
+                                                        }}
+                                                        className={`flex-1 py-3 rounded-2xl text-base font-black transition-all shadow-sm border-2 flex flex-col items-center justify-center gap-0 ${isSelected && !isOutOfStock
+                                                            ? 'bg-brand-primary text-white border-brand-primary shadow-brand-primary/20 scale-105'
+                                                            : isOutOfStock
+                                                                ? 'bg-red-50 text-red-500 border-red-200 opacity-90'
+                                                                : 'bg-white text-slate-600 border-slate-100 hover:border-brand-primary/50 hover:bg-slate-50'
+                                                            }`}
+                                                    >
+                                                        <span className="flex items-center gap-1 text-sm">
+                                                            {bottleForSize.name}
+                                                            {isSelected && !isOutOfStock && <span>✔</span>}
+                                                            {isOutOfStock && <span>❌</span>}
+                                                        </span>
+                                                        <span className="text-[9px] font-bold opacity-70">
+                                                            {isOutOfStock ? 'نفد' : `متاح: ${bottleForSize.stock_quantity}`}
+                                                        </span>
+                                                    </button>
+                                                )
+                                            })
+                                        })()}
                                     </div>
 
                                     <select
@@ -874,6 +1405,7 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                     </div>
                                 </div>
 
+
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <label className="text-sm font-bold text-slate-500">سعر البيع الافتراضي</label>
@@ -897,9 +1429,9 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                                 value={oilConfig.discount}
                                                 onChange={(e) => setOilConfig({ ...oilConfig, discount: e.target.value })}
                                                 className="w-full bg-emerald-50/50 border-2 border-emerald-100 rounded-2xl py-3 pr-4 pl-12 outline-none focus:border-emerald-500 transition-colors font-black text-lg text-emerald-700"
-                                                placeholder="0.00"
+                                                placeholder="0"
                                             />
-                                            <span className="absolute left-4 top-4 text-xs font-bold text-emerald-400">ج.م</span>
+                                            <span className="absolute left-4 top-4 text-sm font-bold text-emerald-400">%</span>
                                         </div>
                                     </div>
                                 </div>
@@ -907,7 +1439,7 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                 <div className="bg-slate-900 text-white p-4 rounded-2xl flex justify-between items-center shadow-lg shadow-slate-900/10">
                                     <span className="font-bold text-slate-400">السعر النهائي بعد الخصم</span>
                                     <span className="font-black text-2xl">
-                                        {Math.max(0, (parseFloat(oilConfig.price || 0) - parseFloat(oilConfig.discount || 0))).toFixed(2)} ج.م
+                                        {(parseFloat(oilConfig.price || 0) * (1 - (parseFloat(oilConfig.discount || 0) / 100))).toFixed(2)} ج.م
                                     </span>
                                 </div>
                             </div>
@@ -935,36 +1467,46 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                             }
                                         }
 
-                                        // Validate Oils Stock
+                                        // Validate Oils Stock (strict unit-based check)
                                         for (const item of oilConfig.oils) {
                                             if (!item.ml || parseFloat(item.ml) <= 0) {
                                                 notify(`برجاء تحديد كمية للزيت: ${item.oil.name} `, 'error')
                                                 return;
                                             }
-                                            if (item.oil.stock_quantity < parseFloat(item.ml)) {
-                                                notify(`الكمية غير كافية للزيت: ${item.oil.name} (المتاح: ${item.oil.stock_quantity})`, 'error')
+                                            // Strictly check unit: gram products use total_gram, ml/oil use total_ml
+                                            let availableStock;
+                                            if (item.oil.sell_unit === 'gram') {
+                                                availableStock = parseFloat(item.oil.total_gram || item.oil.stock_quantity || 0);
+                                            } else if (item.oil.sell_unit === 'ml') {
+                                                availableStock = parseFloat(item.oil.total_ml || item.oil.stock_quantity || 0);
+                                            } else {
+                                                // General oil category: prefer total_gram then total_ml
+                                                availableStock = parseFloat(item.oil.total_gram || item.oil.total_ml || item.oil.stock_quantity || 0);
+                                            }
+
+                                            if (availableStock < parseFloat(item.ml)) {
+                                                notify(`الكمية غير كافية للزيت: ${item.oil.name} (المتاح: ${availableStock})`, 'error')
                                                 return;
                                             }
                                         }
 
-                                        const finalPrice = Math.max(0, parseFloat(oilConfig.price) - parseFloat(oilConfig.discount || 0));
+                                        const discountVal = parseFloat(oilConfig.discount) || 0;
+                                        const originalPrice = parseFloat(oilConfig.price) || 0;
+                                        const finalPrice = Math.max(0, originalPrice * (1 - discountVal / 100));
 
-                                        // Construct a clean, human-readable description for the invoice
                                         const bottleText = oilConfig.bottle ? `نوع الزجاجة: ${oilConfig.bottle.name} ` : 'بدون زجاجة';
-                                        const oilsText = oilConfig.oils.map(o => o.oil.name).join(' + ');
-                                        const description = `${bottleText} \nالمكونات: ${oilsText} `;
+                                        const oilsText = oilConfig.oils.map(o => `${o.oil.name} (${o.ml} مل)`).join(' + ');
+                                        const description = `${bottleText} \nالمكونات: ${oilsText}`;
 
-                                        // Prepare cart item
                                         const cartItem = {
                                             id: Date.now(),
                                             type: 'oil_mix',
-                                            name: oilConfig.bottle ? `تركيبة عطور` : `زيت خام`, // Generic Name
-                                            description: description, // Complete details here
-                                            price: finalPrice,
-                                            discount: parseFloat(oilConfig.discount) || 0,
+                                            name: `تركيبة عطور`,
+                                            description: description,
+                                            price: originalPrice,
+                                            discount: discountVal,
                                             qty: 1,
                                             itemType: 'product',
-                                            // Backend Data (Keep for Stock deduction)
                                             oils: oilConfig.oils.map(o => ({ oil_id: o.oil.id, ml: parseFloat(o.ml) })),
                                             bottle_id: oilConfig.bottle ? oilConfig.bottle.id : null,
                                         }
@@ -1020,14 +1562,21 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                             />
                                         )}
                                         <h1 className="text-lg font-bold m-0">{settings.shop_name}</h1>
-                                        <p className="m-1 text-xs">{settings.shop_address}</p>
-                                        <p className="m-1 font-bold">هاتف: {settings.shop_phone}</p>
+                                        {settings.shop_address && (
+                                            <p className="m-1 text-xs">{settings.shop_address}</p>
+                                        )}
+                                        {settings.shop_phone && (
+                                            <p className="m-1 font-bold">هاتف: {settings.shop_phone}</p>
+                                        )}
+                                        {settings.shop_whatsapp && (
+                                            <p className="m-1 font-bold">واتساب: {settings.shop_whatsapp}</p>
+                                        )}
                                     </div>
                                     <div className="mb-4 space-y-1">
                                         <div className="flex justify-between"><span>تاريخ:</span><span>{new Date().toLocaleDateString('ar-EG')}</span></div>
                                         <div className="flex justify-between"><span>رقم الفاتورة:</span><span className="font-black text-lg">#{receiptData.invoiceCode || '---'}</span></div>
                                         <div className="flex justify-between"><span>بائع:</span><span>{user.username}</span></div>
-                                        <div className="flex justify-between"><span>عميل:</span><span>{customerName || '---'}</span></div>
+                                        <div className="flex justify-between"><span>عميل:</span><span>{receiptData.customer_name || '---'}</span></div>
                                     </div>
                                     <table className="w-full mb-6 border-y border-dashed border-slate-300 py-2">
                                         <thead>
@@ -1042,7 +1591,13 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                                 <tr key={i} className="border-b border-slate-50">
                                                     <td className="py-2 text-right">
                                                         <div className="font-bold">{item.name}</div>
-                                                        {item.description && <div className="text-[10px] whitespace-pre-line text-slate-500">{item.description}</div>}
+                                                        {item.description && <div className="text-[10px] whitespace-pre-line text-slate-500">
+                                                            {settings.show_ml_in_invoices === '0' 
+                                                                ? item.description
+                                                                    .replace(/\s?\([0-9.]+\s*م[لي]+\)/g, '')
+                                                                    .replace(/[0-9.]+\s*م[لي]+\s*/g, '')
+                                                                : item.description}
+                                                        </div>}
                                                         {item.discount > 0 && <div className="text-[10px] font-bold">خصم: {item.discount} ج.م</div>}
                                                     </td>
                                                     <td className="py-2 text-center align-top">{item.qty}</td>
@@ -1051,8 +1606,20 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                             ))}
                                         </tbody>
                                     </table>
-                                    <div className="text-center p-3 border-2 border-slate-900 rounded-lg text-lg font-black bg-slate-50 mb-4">
-                                        الإجمالي: {total} ج.م
+                                    {itemsDiscount > 0 && (
+                                        <div className="flex justify-between text-xs font-bold mb-1 opacity-70">
+                                            <span>قبل الخصم:</span>
+                                            <span className="line-through text-slate-400">{itemsSubtotal.toFixed(2)} ج.م</span>
+                                        </div>
+                                    )}
+                                    {itemsDiscount > 0 && (
+                                        <div className="flex justify-between text-xs font-bold mb-2 text-emerald-600">
+                                            <span>الخصم ({((itemsDiscount/itemsSubtotal)*100).toFixed(0)}%):</span>
+                                            <span>-{itemsDiscount.toFixed(2)} ج.م</span>
+                                        </div>
+                                    )}
+                                    <div className="text-center p-4 border-2 border-slate-900 rounded-lg text-lg font-black bg-slate-50 mb-4">
+                                        الإجمالي النهائي: {total.toFixed(2)} ج.م
                                     </div>
                                     <div className="text-center text-[10px] space-y-1 opacity-60">
                                         <p>*** شكراً لزيارتكم ***</p>
@@ -1118,7 +1685,7 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                 )}
                             </div>
 
-                            <div className="p-8 bg-white border-t border-slate-100 grid grid-cols-2 gap-4">
+                            <div className={`p-8 bg-white border-t border-slate-100 grid ${settings.show_sticker_button !== '0' ? 'grid-cols-3' : 'grid-cols-2'} gap-3`}>
                                 <button
                                     onClick={() => setShowPreview(false)}
                                     className="px-6 py-4 bg-slate-100 text-slate-500 font-black rounded-2xl hover:bg-slate-200 transition-all active:scale-95"
@@ -1132,135 +1699,37 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                     <Printer className="w-5 h-5" />
                                     تأكيد وطباعة
                                 </button>
+                                {settings.show_sticker_button !== '0' && (
+                                    <button
+                                        onClick={() => {
+                                            setIsPrintingSticker(true)
+                                            setTimeout(() => {
+                                                handleStickerPrint()
+                                                setIsPrintingSticker(false)
+                                            }, 100)
+                                        }}
+                                        className="px-4 py-4 bg-amber-500 text-white font-black rounded-2xl shadow-xl shadow-amber-500/30 hover:bg-amber-400 transition-all active:scale-95 flex items-center justify-center gap-2"
+                                    >
+                                        <Printer className="w-4 h-4" />
+                                        طباعة استيكر
+                                    </button>
+                                )}
                             </div>
                         </motion.div>
                     </motion.div>
                 )}
             </AnimatePresence>
 
+            {/* Lazy Render Printable Components removed - using printComponent instead */}
+
             {/* Hidden Invoice for Printing (Thermal) */}
             <div style={{ display: 'none' }}>
-                <div ref={componentRef} style={{
-                    padding: '10px',
-                    direction: 'rtl',
-                    fontFamily: "'Inter', 'Arial', sans-serif",
-                    width: '72mm', // Standard safe width for 80mm printers
-                    color: '#000',
-                    backgroundColor: '#fff',
-                    margin: '0 auto'
-                }}>
-                    {/* Shop Header */}
-                    {/* Shop Header */}
-                    <div style={{ textAlign: 'center', marginBottom: '15px', paddingTop: '30px' }}>
-                        <h1 style={{ margin: '0', fontSize: '22px', fontWeight: '900' }}>{settings.shop_name}</h1>
-                        <p style={{ margin: '5px 0', fontSize: '13px' }}>{settings.shop_address}</p>
-                        <p style={{ margin: '5px 0', fontSize: '14px', fontWeight: 'bold' }}>هاتف: {settings.shop_phone}</p>
-                    </div>
-
-                    <div style={{ textAlign: 'center', margin: '10px 0', fontSize: '12px', letterSpacing: '2px' }}>
-                        --------------------------------------------------
-                    </div>
-
-                    {/* Transaction Info */}
-                    <div style={{ marginBottom: '15px', fontSize: '15px', direction: 'rtl', padding: '0 5px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', whiteSpace: 'nowrap', alignItems: 'center' }}>
-                            <span style={{ fontWeight: 'bold' }}>رقم الفاتورة:</span>
-                            <span style={{ fontWeight: '900', fontSize: '16px' }}>#{receiptData.invoiceCode || '---'}</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                            <span style={{ fontWeight: 'bold' }}>التاريخ:</span>
-                            <span>{new Date().toLocaleDateString('ar-EG')}   {new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                            <span style={{ fontWeight: 'bold' }}>البائع:</span>
-                            <span>{user.username}</span>
-                        </div>
-                    </div>
-
-                    {/* Items Table Header */}
-                    <div style={{
-                        display: 'flex',
-                        padding: '10px 0',
-                        fontWeight: 'bold',
-                        fontSize: '16px',
-                        borderBottom: '1px solid #000',
-                        marginBottom: '10px'
-                    }}>
-                        <div style={{ flex: 1.5, textAlign: 'right' }}>الصنف</div>
-                        <div style={{ flex: 1, textAlign: 'center' }}>الكمية</div>
-                        <div style={{ flex: 1.2, textAlign: 'left' }}>الإجمالي</div>
-                    </div>
-
-                    {/* Items List */}
-                    <div style={{ marginBottom: '10px' }}>
-                        {receiptData.items.map((item, idx) => (
-                            <div key={idx} style={{
-                                padding: '5px 0',
-                                fontSize: '13px'
-                            }}>
-                                <div style={{ display: 'flex', marginBottom: '2px' }}>
-                                    <div style={{ flex: 2, textAlign: 'right', fontWeight: 'bold' }}>{item.name}</div>
-                                    <div style={{ flex: 0.8, textAlign: 'center' }}>{item.quantity}</div>
-                                    <div style={{ flex: 1.2, textAlign: 'left', fontWeight: 'bold' }}>{((item.price) * item.quantity).toFixed(2)}</div>
-                                </div>
-                                {item.description && (
-                                    <div style={{ fontSize: '11px', color: '#000', whiteSpace: 'pre-line', paddingRight: '5px', marginBottom: '2px' }}>
-                                        {item.description}
-                                    </div>
-                                )}
-                                {item.discount > 0 && (
-                                    <div style={{ fontSize: '11px', color: '#000', fontWeight: 'bold', fontStyle: 'italic' }}>
-                                        (خصم: {item.discount} ج.م)
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-                    </div>
-
-                    {/* Total Section */}
-                    <div style={{
-                        backgroundColor: '#f8f9fa',
-                        padding: '10px 15px',
-                        margin: '10px 0',
-                        borderTop: '2px solid #000'
-                    }}>
-                        <div style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            fontSize: '18px',
-                            fontWeight: '900',
-                            whiteSpace: 'nowrap'
-                        }}>
-                            <span>الإجمالي النهائـي:</span>
-                            <span>{receiptData.total} ج.م</span>
-                        </div>
-                    </div>
-
-                    {/* Footer */}
-                    <div style={{ textAlign: 'center', fontSize: '14px', marginTop: '20px' }}>
-                        <div style={{ fontWeight: '900', fontSize: '18px', marginBottom: '8px' }}>*** شكراً لثقتكم بنا ***</div>
-                        <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>يسعدنا خدمتكم دائماً</div>
-                        <div style={{ marginBottom: '15px' }}>برجاء الاحتفاظ بالفاتورة</div>
-
-                        <div style={{ marginTop: '20px', letterSpacing: '2px', fontSize: '12px' }}>
-                            --------------------------------------------------
-                        </div>
-
-                        {/* Facebook QR Code */}
-                        {/* Custom QR Code Image */}
-                        {settings.qr_code_image && (
-                            <div style={{ marginTop: '15px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                                <img
-                                    src={settings.qr_code_image}
-                                    alt="Store QR"
-                                    style={{ width: '100px', height: '100px', marginBottom: '5px' }}
-                                />
-                                <div style={{ fontSize: '11px', fontWeight: 'bold' }}>يمكنكم مسح الكود للتواصل معنا</div>
-                            </div>
-                        )}
-                    </div>
-                </div>
+                <PrintableInvoice
+                    ref={componentRef}
+                    sale={receiptData}
+                    settings={settings}
+                    parseDetails={parseDetails}
+                />
             </div>
 
             {/* Sales History Modal */}
@@ -1379,6 +1848,58 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                                                 <div className="font-black text-slate-700">{item.price} ج.م</div>
                                                             </div>
                                                         ))}
+                                                        <div className="mt-4 pt-4 border-t border-slate-100 flex justify-end gap-2">
+                                                            {!sale.is_return && (
+                                                                <>
+                                                                    <button
+                                                                        onClick={() => handleReprintSticker(sale)}
+                                                                        className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black transition-all active:scale-95"
+                                                                    >
+                                                                        <Printer className="w-4 h-4" />
+                                                                        طبع استيكر
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => handleReprintInvoice(sale)}
+                                                                        className="flex items-center gap-2 px-4 py-2 bg-brand-primary hover:bg-brand-primary/90 text-white rounded-xl text-xs font-black transition-all active:scale-95"
+                                                                    >
+                                                                        <Printer className="w-4 h-4" />
+                                                                        طبع فاتورة
+                                                                    </button>
+                                                                </>
+                                                            )}
+                                                            {sale.customer_phone && (
+                                                                <button
+                                                                    onClick={async () => {
+                                                                        try {
+                                                                            const res = await window.api.sendWhatsApp({
+                                                                                phone: sale.customer_phone,
+                                                                                invoiceCode: sale.invoice_code || sale.id,
+                                                                                customerName: sale.customer_name,
+                                                                                total: sale.total,
+                                                                                items: sale.items.map(i => ({ name: i.item_name, quantity: i.quantity }))
+                                                                            });
+
+                                                                            if (res.success) {
+                                                                                if (res.method === 'bot') {
+                                                                                    notify('تم إرسال الفاتورة آلياً بنجاح ✅', 'success');
+                                                                                } else {
+                                                                                    notify('البوت غير متصل. جاري فتح رابط الإرسال اليدوي...', 'warning');
+                                                                                    if (res.url) window.api.openExternal(res.url);
+                                                                                }
+                                                                            } else {
+                                                                                notify('فشل الإرسال: ' + res.message, 'error');
+                                                                            }
+                                                                        } catch (err) {
+                                                                            notify('خطأ تقني: ' + err.message, 'error');
+                                                                        }
+                                                                    }}
+                                                                    className="flex items-center gap-2 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl text-xs font-black transition-all active:scale-95"
+                                                                >
+                                                                    <MessageCircle className="w-4 h-4" />
+                                                                    إرسال واتساب
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 )}
                                             </motion.div>
@@ -1417,6 +1938,7 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                         setReturnInvoiceId('')
                                         setReturnSale(null)
                                         setSelectedReturnItems([])
+                                        setReturnSearchResults([])
                                     }}
                                     className="text-slate-400 hover:text-slate-900 transition-all"
                                 >
@@ -1439,7 +1961,7 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                                 type="text"
                                                 value={returnInvoiceId}
                                                 onChange={(e) => setReturnInvoiceId(e.target.value)}
-                                                placeholder="أدخل رقم العملية (مثال: #25)..."
+                                                placeholder="أدخل رقم العملية المنتهي أو اسم العميل..."
                                                 className="flex-1 bg-slate-50 border-2 border-slate-200 rounded-2xl py-4 px-6 text-lg font-bold outline-none focus:border-red-500 transition-all text-right"
                                             />
                                             <button
@@ -1449,6 +1971,36 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                                 بحث
                                             </button>
                                         </div>
+                                        {returnSearchResults.length > 0 && (
+                                            <div className="mt-4 bg-white border-2 border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+                                                <div className="bg-slate-50 p-4 border-b border-slate-100 text-right font-black text-slate-700">
+                                                    نتائج البحث لـ "{returnInvoiceId}":
+                                                </div>
+                                                <div className="max-h-64 overflow-y-auto">
+                                                    {returnSearchResults.map((sale) => (
+                                                        <div
+                                                            key={sale.id}
+                                                            onClick={async () => {
+                                                                const s = await window.api.findSaleById(sale.id);
+                                                                handleSetReturnSale(s);
+                                                            }}
+                                                            className="p-4 border-b border-slate-50 hover:bg-red-50 cursor-pointer transition-colors flex justify-between items-center text-right"
+                                                        >
+                                                            <div className="flex gap-4 items-center">
+                                                                <span className="font-black text-brand-primary text-xl px-4">{sale.total} ج.م</span>
+                                                                <div>
+                                                                    <div className="font-bold text-slate-800">فاتورة #{sale.invoice_code || sale.id}</div>
+                                                                    <div className="text-sm text-slate-500">{new Date(sale.date).toLocaleString('ar-EG')}</div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="w-10 h-10 rounded-full bg-red-100 text-red-600 flex items-center justify-center">
+                                                                <RefreshCw className="w-5 h-5" />
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 ) : (
                                     /* Step 2: Select Items & Process */
@@ -1485,7 +2037,9 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                                             </div>
                                                             <div className="text-right">
                                                                 <div className="flex items-center gap-2">
-                                                                    <div className="font-black text-slate-900">{item.item_name}</div>
+                                                                    <div className="font-black text-slate-900">
+                                                                        {item.isUnified && item.bottle_name ? `تركيبة عطور (${item.bottle_name})` : item.item_name}
+                                                                    </div>
                                                                     {item.remaining_quantity <= 0 && (
                                                                         <span className="px-2 py-0.5 bg-slate-200 text-slate-600 text-xs font-bold rounded-lg">تم إرجاعه بالكامل</span>
                                                                     )}
@@ -1598,6 +2152,7 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                                         onClick={() => {
                                             setReturnSale(null)
                                             setSelectedReturnItems([])
+                                            setReturnSearchResults([])
                                         }}
                                         className="px-8 bg-slate-100 hover:bg-slate-200 text-slate-700 py-4 rounded-2xl font-black transition-all"
                                     >
@@ -1609,6 +2164,90 @@ export default function CashierPanel({ user, onLogout, notify, ask }) {
                     </motion.div>
                 )}
             </AnimatePresence>
+            {/* Price Selection Modal */}
+            {itemToChoosePrice && (() => {
+                const retailPrice = resolvePrice(itemToChoosePrice, false);
+                const wholesalePrice = resolvePrice(itemToChoosePrice, true);
+
+                return (
+                    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+                        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-[2.5rem] w-full max-w-md overflow-hidden shadow-2xl">
+                            <div className="p-8 border-b bg-slate-50">
+                                <h3 className="text-2xl font-black text-slate-800 text-center">اختيار نوع السعر</h3>
+                                <p className="text-slate-500 text-center font-bold mt-2">{itemToChoosePrice.name}</p>
+                            </div>
+                            <div className="p-8 space-y-4">
+                                <button
+                                    onClick={() => {
+                                        const item = { ...itemToChoosePrice, price: retailPrice, is_choosing_price: true };
+                                        if (item.category === 'oil' || item.category === 'زيت') {
+                                            setOilConfig({
+                                                show: true,
+                                                oils: [{ oil: item, ml: '' }],
+                                                price: '',
+                                                discount: '',
+                                                bottle: lastBottle || null,
+                                                pricingTier: 'retail'
+                                            });
+                                        } else {
+                                            proceedAddToCart(item, itemToChoosePrice.type || 'product');
+                                        }
+                                        setItemToChoosePrice(null);
+                                    }}
+                                    className="w-full flex items-center justify-between p-6 rounded-2xl border-2 border-slate-100 hover:border-brand-primary hover:bg-purple-50 transition-all group"
+                                >
+                                    <div className="text-right">
+                                        <span className="block font-black text-slate-800 text-lg">سعر القطاعي</span>
+                                        <span className="text-brand-primary font-black text-xl">{retailPrice} ج.م</span>
+                                    </div>
+                                    <div className="w-12 h-12 rounded-xl bg-slate-50 group-hover:bg-brand-primary/10 flex items-center justify-center text-slate-400 group-hover:text-brand-primary transition-all">
+                                        <Users size={24} />
+                                    </div>
+                                </button>
+
+                                <button
+                                    onClick={() => {
+                                        const wholesaleItem = { 
+                                            ...itemToChoosePrice, 
+                                            price: wholesalePrice,
+                                            is_choosing_price: true 
+                                        };
+                                        if (wholesaleItem.category === 'oil' || wholesaleItem.category === 'زيت') {
+                                            setOilConfig({
+                                                show: true,
+                                                oils: [{ oil: wholesaleItem, ml: '' }],
+                                                price: '',
+                                                discount: '',
+                                                bottle: lastBottle || null,
+                                                pricingTier: 'wholesale'
+                                            });
+                                        } else {
+                                            proceedAddToCart(wholesaleItem, itemToChoosePrice.type || 'product');
+                                        }
+                                        setItemToChoosePrice(null);
+                                    }}
+                                    className="w-full flex items-center justify-between p-6 rounded-2xl border-2 border-slate-100 hover:border-indigo-600 hover:bg-indigo-50 transition-all group"
+                                >
+                                    <div className="text-right">
+                                        <span className="block font-black text-slate-800 text-lg">سعر الجملة</span>
+                                        <span className="text-indigo-600 font-black text-xl">{wholesalePrice} ج.م</span>
+                                    </div>
+                                    <div className="w-12 h-12 rounded-xl bg-slate-50 group-hover:bg-indigo-100 flex items-center justify-center text-slate-400 group-hover:text-indigo-600 transition-all">
+                                        <Package size={24} />
+                                    </div>
+                                </button>
+
+                                <button
+                                    onClick={() => setItemToChoosePrice(null)}
+                                    className="w-full py-4 text-slate-400 font-bold hover:text-slate-600 transition-all"
+                                >
+                                    إلغاء
+                                </button>
+                            </div>
+                        </motion.div>
+                    </div>
+                );
+            })()}
         </div>
     )
 }

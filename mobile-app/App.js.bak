@@ -1,0 +1,43 @@
+import React from 'react';
+import { StyleSheet, Text, View, SafeAreaView } from 'react-native';
+
+export default function App() {
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.content}>
+        <Text style={styles.title}>جاري التحقق من الاتصال... 🔄</Text>
+        <Text style={styles.subtitle}>إذا ظهرت لك هذه الشاشة، فهذا يعني أن التطبيق يعمل بنجاح.</Text>
+        <Text style={styles.debug}>Version: 1.0.1 (Debug Mode)</Text>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  content: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  debug: {
+    fontSize: 12,
+    color: '#999',
+  }
+});

@@ -1,0 +1,21 @@
+
+=========================================
+MASTER CONTROL CENTER IS ACTIVE
+=========================================
+
+1. Your Local Server: http://localhost:5001
+2. Your Remote Link (Tunnel): https://yassen-master-pos.loca.lt
+
+-----------------------------------------
+INSTRUCTIONS FOR CLIENT SHOPS:
+-----------------------------------------
+1. Open POS App on Client Laptop.
+2. Go to Developer Dashboard -> Cloud Settings.
+3. Paste the Tunnel Link into "API URL".
+4. Once linked, the shop will appear on your laptop.
+
+-----------------------------------------
+IMPORTANT:
+Keep the Terminal window running 'control-center.js' open 
+to maintain the remote connection.
+=========================================

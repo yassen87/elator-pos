@@ -1,0 +1,26 @@
+directories:
+  output: dist_v2
+  buildResources: build
+appId: com.perfumeshop.system
+productName: ElatorPerfume
+files:
+  - filter:
+      - out/**/*
+      - resources/**/*
+      - package.json
+asar: true
+win:
+  executableName: ElatorPerfume
+  icon: resources/app_icon.jpg
+  compression: maximum
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  artifactName: ${productName}-Setup-${version}.${ext}
+  shortcutName: سيستم العطور
+  oneClick: true
+  allowToChangeInstallationDirectory: false
+npmRebuild: false
+electronVersion: 34.5.8

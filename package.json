@@ -1,9 +1,9 @@
 {
   "name": "elator-pos",
-  "version": "1.0.0",
+  "version": "1.1.3",
   "description": "نظام إدارة محل عطور بريميوم",
   "main": "./out/main/index.js",
-  "author": "Yassen87",
+  "author": "Yassen&Amr",
   "homepage": "https://github.com/yassen87/elator-pos",
   "repository": {
     "type": "git",
@@ -16,19 +16,32 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "postinstall": "electron-builder install-app-deps",
-    "build:unpack": "npm run build && electron-builder --dir",
-    "build:win": "npm run build && electron-builder --win",
+    "build:unpack": "npm run build && electron-builder --dir --win --x64",
+    "build:win": "npm run build && electron-builder --win --x64",
+    "build:win:fast": "npm run build && electron-builder --dir --win --x64",
     "build:mac": "npm run build && electron-builder --mac",
-    "build:linux": "npm run build && electron-builder --linux"
+    "build:linux": "npm run build && electron-builder --linux",
+    "web:build": "vite build -c vite.config.web.mjs"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "axios": "^1.13.2",
     "better-sqlite3": "^12.5.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.3",
     "electron-updater": "^6.7.3",
     "exceljs": "^4.4.0",
+    "express": "^5.2.1",
+    "form-data": "^4.0.5",
     "jspdf": "^4.0.0",
-    "jspdf-autotable": "^5.0.7"
+    "jspdf-autotable": "^5.0.7",
+    "localtunnel": "^2.0.2",
+    "multer": "^2.1.1",
+    "qrcode": "^1.5.4",
+    "react-qr-code": "^2.0.18",
+    "whatsapp-web.js": "^1.34.4",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config": "^2.1.0",
@@ -37,7 +50,7 @@
     "@vitejs/plugin-react": "^5.1.1",
     "autoprefixer": "^10.4.23",
     "clsx": "^2.1.1",
-    "electron": "^39.2.6",
+    "electron": "^34.0.0",
     "electron-builder": "^26.0.12",
     "electron-vite": "^5.0.0",
     "eslint": "^9.39.1",

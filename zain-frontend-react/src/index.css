@@ -1,0 +1,118 @@
+/* zain-frontend-react/src/index.css */
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+
+:root {
+  --primary: #000000;
+  --accent: #d4af37;
+  --bg: #ffffff;
+  --bg-offset: #fbfbfb;
+  --text: #111111;
+  --text-muted: #666666;
+  --border: #f0f0f0;
+  --hero-overlay: rgba(0, 0, 0, 0.4);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
+}
+
+h1, h2, h3, h4, .serif {
+  font-family: 'Playfair Display', serif;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 5%;
+}
+
+/* Luxury Components */
+.btn-premium {
+  padding: 14px 40px;
+  background: white;
+  color: black;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  text-transform: capitalize;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+  transition: all 0.3s ease;
+}
+
+.btn-premium:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+}
+
+/* Section Styling */
+.section-title {
+  text-align: center;
+  font-size: 2.5rem;
+  margin-bottom: 50px;
+  text-transform: capitalize;
+}
+
+/* Fluted Wall Background Effect */
+.fluted-wall {
+  background-image: repeating-linear-gradient(90deg, #f8f8f8, #f8f8f8 20px, #ffffff 20px, #ffffff 40px);
+  padding: 80px 0;
+}
+
+/* Navigation Overlays */
+.announcement-bar {
+  background: black;
+  color: white;
+  padding: 8px 0;
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.scrolling-text {
+  display: inline-block;
+  animation: scrollText 20s linear infinite;
+}
+
+@keyframes scrollText {
+  from { transform: translateX(100%); }
+  to { transform: translateX(-100%); }
+}
+
+/* RTL Specifics (Arabic) */
+[dir="rtl"] {
+  font-family: 'Amiri', 'Playfair Display', serif;
+}
+
+/* Micro-animations */
+.fade-up {
+  opacity: 0;
+  transform: translateY(30px);
+  animation: fadeUp 1s cubic-bezier(0.2, 1, 0.3, 1) forwards;
+}
+
+@keyframes fadeUp {
+  to { opacity: 1; transform: translateY(0); }
+}

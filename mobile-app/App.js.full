@@ -1,0 +1,893 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  TextInput,
+  ScrollView,
+  SafeAreaView,
+  StatusBar,
+  ActivityIndicator,
+  RefreshControl,
+  Dimensions,
+  Platform,
+  Alert
+} from 'react-native';
+import { 
+  TrendingUp, 
+  Users, 
+  Package, 
+  AlertCircle, 
+  LogOut, 
+  ShoppingCart, 
+  BarChart3, 
+  Settings,
+  ShoppingBag,
+  ChevronLeft
+} from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createClient } from '@supabase/supabase-js';
+import { CLOUD_CONFIG, AUTH_CONFIG } from './src/config';
+
+// Initialize Supabase
+const getSupabase = async () => {
+  let url = CLOUD_CONFIG.URL;
+  let key = CLOUD_CONFIG.ANON_KEY;
+
+  if (!url || !key) {
+    url = await AsyncStorage.getItem('supabase_url');
+    key = await AsyncStorage.getItem('supabase_key');
+  }
+
+  if (url && key) {
+    return createClient(url, key);
+  }
+  return null;
+};
+
+const { width } = Dimensions.get('window');
+
+export default function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [syncData, setSyncData] = useState({ sales: [], products: [], totalSales: 0 });
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [settings, setSettings] = useState({ url: '', key: '' });
+
+  useEffect(() => {
+    checkLogin();
+  }, []);
+
+  const checkLogin = async () => {
+    const savedUser = await AsyncStorage.getItem('user');
+    if (savedUser) {
+      setUser(JSON.parse(savedUser));
+      setIsLoggedIn(true);
+      fetchData();
+    }
+  };
+
+  const fetchData = async () => {
+    const supabase = await getSupabase();
+    if (!supabase) return;
+
+    setLoading(true);
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      
+      // Fetch Sales
+      const { data: sales, error: salesError } = await supabase
+        .from('sales')
+        .select('*')
+        .gte('created_at', today)
+        .order('created_at', { ascending: false });
+
+      if (salesError) throw salesError;
+
+      // Fetch Low Stock
+      const { data: products, error: prodError } = await supabase
+        .from('products')
+        .select('*')
+        .lte('stock_quantity', 10);
+
+      if (prodError) throw prodError;
+
+      const totalToday = sales?.reduce((acc, s) => acc + s.total, 0) || 0;
+      
+      setSyncData({
+        sales: sales || [],
+        products: products || [],
+        totalSales: totalToday
+      });
+    } catch (err) {
+      console.error('Fetch error:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchData();
+  }, []);
+
+  const handleLogout = async () => {
+    await AsyncStorage.removeItem('user');
+    setIsLoggedIn(false);
+    setUser(null);
+  };
+
+  if (!isLoggedIn) {
+    return <LoginScreen onLogin={(u) => {
+      setUser(u);
+      setIsLoggedIn(true);
+      fetchData();
+    }} />;
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+      
+      {/* Header */}
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.welcomeText}>مرحباً يا {user?.username} 👋</Text>
+          <Text style={styles.subWelcomeText}>إليك ملخص المحل اليوم</Text>
+        </View>
+        <TouchableOpacity 
+          style={styles.headerButton}
+          onPress={() => setActiveTab('settings')}
+        >
+          <Settings size={22} color="#64748b" />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} color="#3b82f6" />
+        }
+      >
+        {activeTab === 'dashboard' && (
+          <View style={styles.tabContent}>
+            {/* Main Stats Card */}
+            <View style={styles.mainCard}>
+              <View style={styles.cardHeader}>
+                <Text style={styles.cardLabel}>مبيعات اليوم</Text>
+                <TrendingUp size={16} color="#bfdbfe" />
+              </View>
+              <View style={styles.amountContainer}>
+                <Text style={styles.amountText}>{syncData.totalSales.toLocaleString()}</Text>
+                <Text style={styles.currencyText}>ج.م</Text>
+              </View>
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>+{syncData.sales.length} فاتورة جديدة</Text>
+              </View>
+            </View>
+
+            {/* Mini Cards */}
+            <View style={styles.miniCardsRow}>
+              <View style={[styles.miniCard, { backgroundColor: '#fff7ed' }]}>
+                <View style={styles.miniIconBg}><Package size={20} color="#f97316" /></View>
+                <Text style={styles.miniLabel}>نواقص المخزون</Text>
+                <Text style={styles.miniValue}>{syncData.products.length}</Text>
+              </View>
+              <View style={[styles.miniCard, { backgroundColor: '#f5f3ff' }]}>
+                <View style={styles.miniIconBg}><Users size={20} color="#8b5cf6" /></View>
+                <Text style={styles.miniLabel}>إجمالي العمليات</Text>
+                <Text style={styles.miniValue}>{syncData.sales.length}</Text>
+              </View>
+            </View>
+
+            {/* Recent Sales Header */}
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>آخر العمليات</Text>
+              <TouchableOpacity onPress={() => setActiveTab('sales')}>
+                <Text style={styles.viewAllText}>عرض الكل</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Sales List */}
+            {loading && !refreshing ? (
+              <ActivityIndicator color="#3b82f6" style={{ marginTop: 20 }} />
+            ) : (
+              <View style={styles.salesList}>
+                {syncData.sales.slice(0, 5).map((sale) => (
+                  <View key={sale.id} style={styles.saleItem}>
+                    <View style={styles.saleItemLeft}>
+                      <View style={styles.saleIcon}>
+                        <ShoppingCart size={20} color="#3b82f6" />
+                      </View>
+                      <View>
+                        <Text style={styles.saleTitle}>فاتورة #{sale.invoice_code}</Text>
+                        <Text style={styles.saleTime}>{new Date(sale.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.saleItemRight}>
+                      <Text style={styles.saleAmount}>+{sale.total} ج.م</Text>
+                      <View style={styles.statusBadge}>
+                        <Text style={styles.statusText}>مكتمل</Text>
+                      </View>
+                    </View>
+                  </View>
+                ))}
+                
+                {syncData.sales.length === 0 && (
+                  <View style={styles.emptyState}>
+                    <BarChart3 size={40} color="#cbd5e1" />
+                    <Text style={styles.emptyText}>لا يوجد مبيعات اليوم</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* Low Stock Section */}
+            {syncData.products.length > 0 && (
+              <View style={styles.alertBox}>
+                <View style={styles.alertHeader}>
+                  <AlertCircle size={20} color="#ef4444" />
+                  <Text style={styles.alertTitle}>تنبيهات النواقص</Text>
+                </View>
+                {syncData.products.slice(0, 3).map((p) => (
+                  <View key={p.id} style={styles.alertItem}>
+                    <Text style={styles.alertProdName}>{p.name}</Text>
+                    <Text style={styles.alertProdStock}>{p.stock_quantity} متبقي</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Tab content placeholder for others */}
+        {activeTab === 'settings' && <SettingsScreen onLogout={handleLogout} />}
+        {activeTab === 'sales' && <SalesList sales={syncData.sales} />}
+        {activeTab === 'stock' && <StockList products={syncData.products} />}
+      </ScrollView>
+
+      {/* Bottom Nav */}
+      <View style={styles.bottomNav}>
+        <NavButton 
+          icon={<BarChart3 />} 
+          label="الرئيسية" 
+          active={activeTab === 'dashboard'} 
+          onPress={() => setActiveTab('dashboard')} 
+        />
+        <NavButton 
+          icon={<ShoppingCart />} 
+          label="المبيعات" 
+          active={activeTab === 'sales'} 
+          onPress={() => setActiveTab('sales')} 
+        />
+        <NavButton 
+          icon={<Package />} 
+          label="المخزون" 
+          active={activeTab === 'stock'} 
+          onPress={() => setActiveTab('stock')} 
+        />
+        <NavButton 
+          icon={<Settings />} 
+          label="الإعدادات" 
+          active={activeTab === 'settings'} 
+          onPress={() => setActiveTab('settings')} 
+        />
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const LoginScreen = ({ onLogin }) => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [cloudSettings, setCloudSettings] = useState({ url: '', key: '' });
+  const [showCloud, setShowCloud] = useState(!CLOUD_CONFIG.URL);
+
+  useEffect(() => {
+    loadCloud();
+  }, []);
+
+  const loadCloud = async () => {
+    const url = await AsyncStorage.getItem('supabase_url');
+    const key = await AsyncStorage.getItem('supabase_key');
+    if (url && key) {
+      setCloudSettings({ url, key });
+    }
+  };
+
+  const handleLogin = async () => {
+    if (!username || !password) {
+      Alert.alert('خطأ', 'يرجى إدخال اسم المستخدم وكلمة المرور');
+      return;
+    }
+
+    // Check if cloud is configured (either in config.js or manual)
+    const url = CLOUD_CONFIG.URL || cloudSettings.url;
+    const key = CLOUD_CONFIG.ANON_KEY || cloudSettings.key;
+
+    if (!url || !key) {
+      Alert.alert('إعدادات مفقودة', 'يرجى ضبط إعدادات السحاب (Supabase) أولاً');
+      setShowCloud(true);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const supabase = createClient(url, key);
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('username', username.trim())
+        .eq('password', password.trim())
+        .limit(1)
+        .single();
+
+      if (error || !data) {
+        Alert.alert('خطأ في الدخول', 'اسم المستخدم أو كلمة المرور غير صحيحة');
+      } else {
+        // Save user session
+        await AsyncStorage.setItem('user', JSON.stringify(data));
+        // Save cloud if manual
+        if (!CLOUD_CONFIG.URL) {
+          await AsyncStorage.setItem('supabase_url', url);
+          await AsyncStorage.setItem('supabase_key', key);
+        }
+        onLogin(data);
+      }
+    } catch (err) {
+      Alert.alert('خطأ في الاتصال', 'تعذر الاتصال بقاعدة البيانات');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <View style={styles.loginContainer}>
+      <View style={styles.loginHeader}>
+        <View style={styles.logoIcon}>
+          <ShoppingBag color="#fff" size={40} />
+        </View>
+        <Text style={styles.logoText}>العارين للعطور</Text>
+        <Text style={styles.logoSubText}>لوحة متابعة المدير</Text>
+      </View>
+
+      <View style={styles.loginForm}>
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>اسم المستخدم</Text>
+          <TextInput 
+            style={styles.input}
+            placeholder="admin"
+            value={username}
+            onChangeText={setUsername}
+            autoCapitalize="none"
+          />
+        </View>
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>كلمة المرور</Text>
+          <TextInput 
+            style={styles.input}
+            placeholder="••••••••"
+            secureTextEntry
+            value={password}
+            onChangeText={setPassword}
+          />
+        </View>
+
+        <TouchableOpacity 
+          style={styles.loginButton} 
+          onPress={handleLogin}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.loginButtonText}>تسجيل الدخول</Text>
+          )}
+        </TouchableOpacity>
+
+        {!CLOUD_CONFIG.URL && (
+          <TouchableOpacity 
+            style={styles.configToggle} 
+            onPress={() => setShowCloud(!showCloud)}
+          >
+            <Text style={styles.configToggleText}>
+              {showCloud ? 'إخفاء إعدادات السحاب' : 'ضبط إعدادات السحاب'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {showCloud && !CLOUD_CONFIG.URL && (
+          <View style={styles.cloudConfig}>
+            <TextInput 
+              style={styles.miniInput}
+              placeholder="Supabase URL"
+              value={cloudSettings.url}
+              onChangeText={(t) => setCloudSettings({...cloudSettings, url: t})}
+            />
+            <TextInput 
+              style={styles.miniInput}
+              placeholder="Anon Key"
+              value={cloudSettings.key}
+              onChangeText={(t) => setCloudSettings({...cloudSettings, key: t})}
+              secureTextEntry
+            />
+          </View>
+        )}
+      </View>
+    </View>
+  );
+};
+
+const SettingsScreen = ({ onLogout }) => (
+  <View style={styles.tabContent}>
+    <Text style={styles.sectionTitle}>الإعدادات</Text>
+    <TouchableOpacity style={styles.settingItem} onPress={onLogout}>
+      <LogOut size={20} color="#ef4444" />
+      <Text style={[styles.settingText, { color: '#ef4444' }]}>تسجيل الخروج</Text>
+    </TouchableOpacity>
+    <View style={styles.versionBox}>
+      <Text style={styles.versionText}>الإصدار 1.0.0</Text>
+    </View>
+  </View>
+);
+
+const SalesList = ({ sales }) => (
+  <View style={styles.tabContent}>
+    <Text style={styles.sectionTitle}>جميع مبيعات اليوم</Text>
+    <View style={[styles.salesList, { marginTop: 10 }]}>
+      {sales.map(sale => (
+        <View key={sale.id} style={styles.saleItem}>
+          <View>
+            <Text style={styles.saleTitle}>فاتورة #{sale.invoice_code}</Text>
+            <Text style={styles.saleTime}>{new Date(sale.created_at).toLocaleString('ar-EG')}</Text>
+          </View>
+          <Text style={styles.saleAmount}>{sale.total} ج.م</Text>
+        </View>
+      ))}
+    </View>
+  </View>
+);
+
+const StockList = ({ products }) => (
+  <View style={styles.tabContent}>
+    <Text style={styles.sectionTitle}>المنتجات منخفضة المخزون</Text>
+    <View style={[styles.salesList, { marginTop: 10 }]}>
+      {products.map(p => (
+        <View key={p.id} style={styles.saleItem}>
+          <View>
+            <Text style={styles.saleTitle}>{p.name}</Text>
+            <Text style={styles.saleTime}>الفئة: {p.category}</Text>
+          </View>
+          <Text style={[styles.saleAmount, { color: '#ef4444' }]}>{p.stock_quantity}</Text>
+        </View>
+      ))}
+    </View>
+  </View>
+);
+
+const NavButton = ({ icon, label, active, onPress }) => (
+  <TouchableOpacity style={styles.navBtn} onPress={onPress}>
+    <View style={[styles.navIconBg, active && styles.navIconActive]}>
+      {React.cloneElement(icon, { size: 24, color: active ? '#3b82f6' : '#94a3b8' })}
+    </View>
+    <Text style={[styles.navLabel, active && styles.navLabelActive]}>{label}</Text>
+  </TouchableOpacity>
+);
+
+// Styles
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+    direction: 'rtl',
+  },
+  header: {
+    paddingHorizontal: 25,
+    paddingVertical: 20,
+    backgroundColor: '#fff',
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  welcomeText: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#1e293b',
+    textAlign: 'right',
+  },
+  subWelcomeText: {
+    fontSize: 12,
+    color: '#94a3b8',
+    marginTop: 2,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+  headerButton: {
+    width: 45,
+    height: 45,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scrollContent: {
+    paddingBottom: 40,
+  },
+  tabContent: {
+    padding: 25,
+  },
+  mainCard: {
+    backgroundColor: '#3b82f6',
+    borderRadius: 35,
+    padding: 30,
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  cardHeader: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  cardLabel: {
+    color: '#bfdbfe',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  amountContainer: {
+    flexDirection: 'row-reverse',
+    alignItems: 'baseline',
+    marginTop: 10,
+  },
+  amountText: {
+    fontSize: 42,
+    fontWeight: '900',
+    color: '#fff',
+  },
+  currencyText: {
+    fontSize: 18,
+    color: '#fff',
+    marginRight: 8,
+    fontWeight: '700',
+  },
+  badge: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    alignSelf: 'flex-start',
+    marginTop: 20,
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  miniCardsRow: {
+    flexDirection: 'row-reverse',
+    gap: 15,
+    marginTop: 25,
+  },
+  miniCard: {
+    flex: 1,
+    padding: 20,
+    borderRadius: 30,
+    borderWidth: 1,
+    borderColor: '#fff',
+  },
+  miniIconBg: {
+    width: 40,
+    height: 40,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+  },
+  miniLabel: {
+    fontSize: 11,
+    color: '#64748b',
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  miniValue: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#1e293b',
+  },
+  sectionHeader: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 35,
+    marginBottom: 15,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#1e293b',
+  },
+  viewAllText: {
+    fontSize: 13,
+    color: '#3b82f6',
+    fontWeight: '800',
+  },
+  salesList: {
+    gap: 12,
+  },
+  saleItem: {
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 25,
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+  },
+  saleItemLeft: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 12,
+  },
+  saleIcon: {
+    width: 48,
+    height: 48,
+    backgroundColor: '#eff6ff',
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saleTitle: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#1e293b',
+    textAlign: 'right',
+  },
+  saleTime: {
+    fontSize: 11,
+    color: '#94a3b8',
+    fontWeight: '700',
+    textAlign: 'right',
+    marginTop: 2,
+  },
+  saleItemRight: {
+    alignItems: 'flex-start',
+  },
+  saleAmount: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#1e293b',
+  },
+  statusBadge: {
+    backgroundColor: '#f0fdf4',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginTop: 4,
+  },
+  statusText: {
+    color: '#16a34a',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  emptyState: {
+    paddingVertical: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: '#e2e8f0',
+    borderRadius: 30,
+  },
+  emptyText: {
+    color: '#94a3b8',
+    fontWeight: '700',
+    marginTop: 10,
+  },
+  alertBox: {
+    backgroundColor: '#fef2f2',
+    padding: 25,
+    borderRadius: 35,
+    marginTop: 30,
+    borderWidth: 1,
+    borderColor: '#fee2e2',
+  },
+  alertHeader: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 15,
+  },
+  alertTitle: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#991b1b',
+  },
+  alertItem: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#fee2e2',
+  },
+  alertProdName: {
+    fontWeight: '700',
+    color: '#b91c1c',
+    fontSize: 13,
+  },
+  alertProdStock: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#ef4444',
+  },
+  bottomNav: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 85,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingBottom: 25,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+  },
+  navBtn: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  navIconBg: {
+    padding: 8,
+    borderRadius: 14,
+  },
+  navIconActive: {
+    backgroundColor: '#eff6ff',
+  },
+  navLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#94a3b8',
+  },
+  navLabelActive: {
+    color: '#3b82f6',
+  },
+  loginContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+    padding: 30,
+    justifyContent: 'center',
+  },
+  loginHeader: {
+    alignItems: 'center',
+    marginBottom: 50,
+  },
+  logoIcon: {
+    width: 90,
+    height: 90,
+    backgroundColor: '#3b82f6',
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    transform: [{ rotate: '12deg' }],
+  },
+  logoText: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#1e293b',
+    marginTop: 25,
+  },
+  logoSubText: {
+    fontSize: 14,
+    color: '#64748b',
+    fontWeight: '700',
+    marginTop: 5,
+  },
+  loginForm: {
+    gap: 20,
+  },
+  inputGroup: {
+    gap: 8,
+  },
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#64748b',
+    marginRight: 5,
+    textAlign: 'right',
+  },
+  input: {
+    backgroundColor: '#f8fafc',
+    height: 65,
+    borderRadius: 20,
+    paddingHorizontal: 20,
+    fontSize: 16,
+    fontWeight: '700',
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+    textAlign: 'right',
+  },
+  loginButton: {
+    backgroundColor: '#3b82f6',
+    height: 65,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  loginButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  configToggle: {
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  configToggleText: {
+    color: '#94a3b8',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  cloudConfig: {
+    gap: 10,
+    marginTop: 10,
+    padding: 15,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 15,
+  },
+  miniInput: {
+    backgroundColor: '#fff',
+    height: 45,
+    borderRadius: 10,
+    paddingHorizontal: 15,
+    fontSize: 12,
+    textAlign: 'left',
+  },
+  settingItem: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 15,
+    padding: 20,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    marginTop: 20,
+  },
+  settingText: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  versionBox: {
+    alignItems: 'center',
+    marginTop: 30,
+  },
+  versionText: {
+    fontSize: 11,
+    color: '#cbd5e1',
+    fontWeight: '700',
+  }
+});

@@ -1,0 +1,11 @@
+{
+  "name": "attendance-cloud-api",
+  "version": "1.0.0",
+  "description": "Cloud Attendance API for Vercel",
+  "main": "api/index.js",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

@@ -1,0 +1,1 @@
+const Database = require("better-sqlite3"); const db = new Database("C:\\Users\\Hp\\AppData\\Roaming\\elator-pos\\database.sqlite"); const rows = db.prepare("SELECT id, name, price_per_gram, wholesale_price_per_gram, barcode, sell_unit FROM products WHERE category = 'oil' ORDER BY id DESC LIMIT 5").all(); console.log(rows);

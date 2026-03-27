@@ -7,15 +7,15 @@ export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
     build: {
-      sourcemap: false,
-      minify: true
+      sourcemap: true,
+      minify: false
     }
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
     build: {
-      sourcemap: false,
-      minify: true
+      sourcemap: true,
+      minify: false
     }
   },
   renderer: {

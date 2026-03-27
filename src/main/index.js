@@ -1,22 +1,75 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { shell, BrowserWindow, ipcMain, nativeImage, dialog, app as electronApp } from 'electron'
 import { join } from 'path'
-import { autoUpdater } from 'electron-updater'
+import fs from 'fs'
+import 'dotenv/config'
 import icon from '../../resources/icon.png?asset'
-import { initDB } from './db'
+import getDB, { initDB } from './db'
 import { setupIpcHandlers } from './ipcHandlers'
+import { whatsappBot } from './services/whatsappBot'
+import { startAPIServer, stopAPIServer } from './apiServer'
+
+// --- EARLY LOGGING SYSTEM ---
+let logPath = ''
+try {
+  // Use environment variables for early pathing if app.getPath isn't ready
+  const userData = process.env.APPDATA ? join(process.env.APPDATA, 'ElatorPerfume') : ''
+  if (userData) {
+    if (!fs.existsSync(userData)) fs.mkdirSync(userData, { recursive: true })
+    logPath = join(userData, 'early_startup.log')
+  }
+} catch (e) {}
+
+const log = (msg) => {
+  const time = new Date().toISOString()
+  const content = `[${time}] ${msg}\n`
+  console.log(content.trim())
+  if (logPath) {
+    try { fs.appendFileSync(logPath, content) } catch (e) {}
+  }
+}
+
+log('>>> MAIN PROCESS STARTING <<<')
+
+// CRITICAL: Catch errors during early startup
+process.on('uncaughtException', (error) => {
+  log(`[CRITICAL] Uncaught Exception: ${error?.stack || error}`)
+  try {
+    if (electronApp && (electronApp.isReady() || electronApp.isPackaged)) {
+      dialog.showErrorBox('خطأ في تشغيل البرنامج', `حدث خطأ غير متوقع:\n${error?.message || error}\n\nيرجى تصوير هذا الخطأ وإرساله للدعم.`)
+    }
+  } catch (e) {
+    log(`[CRITICAL] Failed to show error box: ${e.message}`)
+  }
+})
+
+process.on('unhandledRejection', (reason) => {
+  log(`[CRITICAL] Unhandled Rejection: ${reason?.stack || reason}`)
+})
 
 function createWindow() {
-  // Create the browser window.
+  const db = getDB()
+  let windowIcon = icon
+
+  try {
+    const settings = db.prepare('SELECT value FROM settings WHERE key = ?').get('shop_logo')
+    if (settings && settings.value) {
+      windowIcon = nativeImage.createFromDataURL(settings.value)
+    }
+  } catch (e) {
+    log(`Failed to load shop logo: ${e.message}`)
+  }
+
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     show: false,
     title: 'سيستم محل عطور',
     autoHideMenuBar: true,
-    ...(process.platform === 'linux' ? { icon } : {}),
+    icon: windowIcon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      webSecurity: false
     }
   })
 
@@ -29,79 +82,109 @@ function createWindow() {
     return { action: 'deny' }
   })
 
-  // HMR for renderer base on electron-vite cli.
-  // Load the remote URL for development or the local html file for production.
-  if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
+  if (!electronApp.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 }
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
-app.whenReady().then(() => {
-  // Set app user model id for windows
-  app.setAppUserModelId('com.electron')
+electronApp.whenReady().then(async () => {
+  logPath = join(electronApp.getPath('userData'), 'debug.log')
+  log(`--- App Ready (${electronApp.isPackaged ? 'Packaged' : 'Dev'}) ---`)
 
-  // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
+  electronApp.setAppUserModelId('com.perfumeshop.system')
 
+  log('Initializing DB...')
   initDB()
+  
+  log('Setting up IPC Handlers...')
   setupIpcHandlers()
+  
+  log('Starting API Server...')
+  try {
+    startAPIServer()
+    log('API Server Started.')
+  } catch (e) {
+    log(`CRITICAL: API Server failed to start: ${e.message}`)
+  }
+
+  log('Creating main window...')
+  const db = getDB()
+  
+  // Registration and Kill Switch Check (Awaited to allow real-time UNLOCK)
+  try {
+    const { default: cloudSync } = await import('./services/cloudSync')
+    const res = await cloudSync.registerWithHub(db)
+    
+    // ONLY update local database with Hub's response if registration succeeded
+    if (res && res.success) {
+      const newState = res.is_disabled ? 'true' : 'false'
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('is_system_blocked', ?)").run(newState)
+      
+      if (res.is_disabled) {
+        log('CRITICAL: Shop is disabled via Hub.')
+      } else {
+        log('Hub Status: Active (Unlocked)')
+      }
+    } else {
+      log('Hub Heartbeat: No authoritative response. Keeping last known security state.')
+    }
+  } catch (e) {
+    log(`Registration/Heartbeat failed (Offline?): ${e.message}`)
+  }
 
   createWindow()
+  log('Main window created.')
+  
+  // Register an IPC to tell the renderer if it's blocked
+  ipcMain.handle('cloud:get-block-status', () => {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'is_system_blocked'").get()
+    return row && row.value === 'true'
+  })
+
+  // Auto-start WhatsApp Bot if session exists
+  setTimeout(() => {
+    const wins = BrowserWindow.getAllWindows()
+    if (wins.length > 0) {
+      log('[Main Init] Auto-starting WhatsApp Bot service...')
+      whatsappBot.initialize(wins[0].webContents).then(() => {
+        log('[Main Init] WhatsApp Bot initialization complete.')
+      }).catch(err => {
+        log(`[Main Init] WhatsApp Bot FAILURE: ${err.message}`)
+      })
+    }
+  }, 5000)
 
   // Auto-updater logic
-  autoUpdater.checkForUpdatesAndNotify()
-
-  autoUpdater.on('checking-for-update', () => {
-    BrowserWindow.getAllWindows()[0]?.webContents.send('update-checking')
-  })
-  autoUpdater.on('update-available', (info) => {
-    BrowserWindow.getAllWindows()[0]?.webContents.send('update-available', info)
-  })
-  autoUpdater.on('update-not-available', (info) => {
-    BrowserWindow.getAllWindows()[0]?.webContents.send('update-not-available', info)
-  })
-  autoUpdater.on('error', (err) => {
-    BrowserWindow.getAllWindows()[0]?.webContents.send('update-error', err)
-  })
-  autoUpdater.on('download-progress', (progressObj) => {
-    BrowserWindow.getAllWindows()[0]?.webContents.send('update-progress', progressObj)
-  })
-  autoUpdater.on('update-downloaded', (info) => {
-    BrowserWindow.getAllWindows()[0]?.webContents.send('update-downloaded', info)
-  })
-
-  ipcMain.handle('update:check', () => {
-    return autoUpdater.checkForUpdates()
-  })
-
-  ipcMain.handle('update:download', () => {
-    return autoUpdater.downloadUpdate()
-  })
-
-  ipcMain.handle('update:install', () => {
-    autoUpdater.quitAndInstall()
-  })
-
-  app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
+  if (electronApp.isPackaged) {
+    ;(async () => {
+      try {
+        const { autoUpdater } = await import('electron-updater')
+        const broadcast = (channel, ...args) => {
+          BrowserWindow.getAllWindows().forEach(win => {
+            if (!win.isDestroyed()) win.webContents.send(channel, ...args)
+          })
+        }
+        autoUpdater.on('error', (err) => log(`[AutoUpdater] Error: ${err.message}`))
+        autoUpdater.checkForUpdatesAndNotify().catch(e => log(`[AutoUpdater] Check failed: ${e.message}`))
+      } catch (err) {
+        log(`[AutoUpdater] Setup failed: ${err.message}`)
+      }
+    })()
+  }
+}).catch(err => {
+  log(`[FATAL] app.whenReady failed: ${err.stack || err}`)
+  dialog.showErrorBox('خطأ فادح', `فشل في بدء البرنامج:\n${err.message}`)
 })
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
-app.on('window-all-closed', () => {
+electronApp.on('window-all-closed', () => {
+  stopAPIServer()
   if (process.platform !== 'darwin') {
-    app.quit()
+    electronApp.quit()
   }
 })
 
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.
+electronApp.on('activate', function () {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow()
+})
