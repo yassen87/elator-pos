@@ -41,3 +41,21 @@ temp/
 *.lab
 *.sqlite
 *.db
+
+# Unrelated projects
+zain-frontend-react/
+zain-perfumes-php/
+zain-standalone-website/
+attendance-mobile/
+cloud-attendance-api/
+todo-list-app/
+backend/
+control-center/
+temp/
+tmp_test/
+*.pdf
+*.xlsm
+*.xlsx
+*.lab
+*.sqlite
+*.db
