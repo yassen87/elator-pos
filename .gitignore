@@ -59,3 +59,11 @@ tmp_test/
 *.lab
 *.sqlite
 *.db
+
+# Build artifacts
+dist_v2/
+release/
+build/
+out/
+app/dist/
+renderer/dist/
