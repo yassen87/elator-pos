@@ -13,6 +13,7 @@ import { generateInvoicePDF } from './services/pdfGenerator'
 import { formatPhoneNumber } from './services/whatsappService'
 import { whatsappBot } from './services/whatsappBot'
 import { inventoryService } from './services/inventoryService'
+import { ean13FromProductId, ean13Random622, ean13FromFormulaId, ean13Random623 } from './utils/barcodeEan13.js'
 import { orderService } from './services/orderService'
 // import { setupWhatsAppHandlers } from './services/whatsappBot' // If exists, or just use bot
 
@@ -313,6 +314,31 @@ export function setupIpcHandlers() {
     return db.prepare('SELECT * FROM products').all()
   })
 
+  ipcMain.handle('products:random-ean13', async () => ean13Random622())
+
+  ipcMain.handle('products:ean-for-id', async (_, id) => ean13FromProductId(Number(id)))
+
+  ipcMain.handle('formulas:ean-for-id', async (_, id) => ean13FromFormulaId(Number(id)))
+
+  ipcMain.handle('formulas:random-ean13', async () => ean13Random623())
+
+  ipcMain.handle('products:regenerate-barcodes', async () => {
+    try {
+      const rows = db.prepare('SELECT id FROM products ORDER BY id ASC').all()
+      const upd = db.prepare('UPDATE products SET barcode = ? WHERE id = ?')
+      db.transaction(() => {
+        for (const r of rows) {
+          upd.run(ean13FromProductId(r.id), r.id)
+        }
+      })()
+      notifySalesChange()
+      return { success: true, count: rows.length }
+    } catch (err) {
+      console.error('[products:regenerate-barcodes]', err)
+      return { success: false, message: err.message }
+    }
+  })
+
   ipcMain.handle('sales:get-next-code', async () => {
     try {
       const result = db.prepare('SELECT MAX(CAST(invoice_code AS NUMBER)) as maxCode FROM sales').get()
@@ -345,7 +371,7 @@ export function setupIpcHandlers() {
     const alert_gram = Number(product.alert_gram) || 0
     const min_stock = Number(product.min_stock) || 10
     const category = product.category || 'oil'
-    const barcode = product.barcode || ''
+    let barcode = String(product.barcode || '').trim()
     const is_website_visible = product.is_website_visible || 0
     const image_url = product.image_url || null
 
@@ -368,8 +394,13 @@ export function setupIpcHandlers() {
         min_stock, alert_ml, alert_gram,
         is_website_visible, image_url
       )
-      console.log('Success! New ID:', result.lastInsertRowid)
-      return { success: true, id: result.lastInsertRowid }
+      const newId = result.lastInsertRowid
+      if (!barcode) {
+        barcode = ean13FromProductId(newId)
+        db.prepare('UPDATE products SET barcode = ? WHERE id = ?').run(barcode, newId)
+      }
+      console.log('Success! New ID:', newId, 'barcode:', barcode)
+      return { success: true, id: newId, barcode }
     } catch (err) {
       console.error('CRITICAL SQL ERROR in products:add:', err.message)
       return { success: false, message: err.message }
@@ -545,24 +576,29 @@ export function setupIpcHandlers() {
   })
 
   // إدارة التركيبات
-  ipcMain.handle('formulas:add', async (event, { name, total_price, items }) => {
-    // 1. Add to formulas table
-    const info = db.prepare('INSERT INTO formulas (name, total_price) VALUES (?, ?)').run(name, total_price)
+  ipcMain.handle('formulas:add', async (event, { name, total_price, items, barcode }) => {
+    const info = db.prepare('INSERT INTO formulas (name, total_price, barcode) VALUES (?, ?, ?)').run(
+      name,
+      total_price,
+      null
+    )
     const formulaId = info.lastInsertRowid
+    let fb = String(barcode || '').trim()
+    if (!fb) fb = ean13FromFormulaId(formulaId)
+    db.prepare('UPDATE formulas SET barcode = ? WHERE id = ?').run(fb, formulaId)
 
-    // 2. Add to products table so it appears in the main list
     db.prepare(`
       INSERT INTO products (name, price, category, stock_quantity, min_stock)
       VALUES (?, ?, 'formula', 999, 0)
     `).run(name, total_price)
 
     const insertItem = db.prepare('INSERT INTO formula_items (formula_id, product_id, custom_name, price, quantity) VALUES (?, ?, ?, ?, ?)')
-    
+
     items.forEach(item => {
       insertItem.run(formulaId, item.product_id || null, item.custom_name || null, item.price || null, item.quantity)
     })
-    
-    return { success: true, id: formulaId }
+
+    return { success: true, id: formulaId, barcode: fb }
   })
 
   ipcMain.handle('formulas:list', async () => {
@@ -584,14 +620,18 @@ export function setupIpcHandlers() {
     return { success: true }
   })
 
-  ipcMain.handle('formulas:update', async (event, { id, name, oldName, total_price, items }) => {
+  ipcMain.handle('formulas:update', async (event, { id, name, oldName, total_price, items, barcode }) => {
     try {
       db.transaction(() => {
-        // 1. Update formulas table
-        db.prepare('UPDATE formulas SET name = ?, total_price = ? WHERE id = ?').run(name, total_price, id)
+        let fb = String(barcode || '').trim()
+        if (!fb) {
+          const row = db.prepare('SELECT barcode FROM formulas WHERE id = ?').get(id)
+          fb = row?.barcode?.trim() || ean13FromFormulaId(id)
+        }
+        db.prepare('UPDATE formulas SET name = ?, total_price = ?, barcode = ? WHERE id = ?').run(name, total_price, fb, id)
         
         // 2. Update products table entry (using oldName to find it)
-        db.prepare('UPDATE products SET name = ?, price = ? WHERE name = ? AND category = "formula"').run(name, total_price, oldName, id)
+        db.prepare('UPDATE products SET name = ?, price = ? WHERE name = ? AND category = "formula"').run(name, total_price, oldName)
 
         // 3. Clear and re-add formula items
         db.prepare('DELETE FROM formula_items WHERE formula_id = ?').run(id)

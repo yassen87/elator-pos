@@ -22,6 +22,8 @@ landing-page/*.zip
 database.sqlite
 *.db
 *.sqlite
+*-shm
+*-wal
 
 # IDE
 .vscode/
@@ -31,6 +33,7 @@ database.sqlite
 *.tmp
 temp/
 *.cache
+_vid_frames/
 
 .vercel
 

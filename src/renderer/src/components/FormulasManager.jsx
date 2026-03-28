@@ -117,7 +117,7 @@ function FormulaCreator({ products, onRefresh, notify, editingFormula, onCancelE
         try {
             const payload = {
                 name: formulaName,
-                barcode: formulaBarcode || '622' + Math.floor(100000000 + Math.random() * 900000000).toString(), // 622 + 9 digits
+                barcode: formulaBarcode.trim() || undefined,
                 total_price: parseFloat(formulaPrice),
                 items: formulaItems.map(i => ({
                     product_id: i.product.id,
@@ -130,7 +130,8 @@ function FormulaCreator({ products, onRefresh, notify, editingFormula, onCancelE
                 res = await window.api.invoke('formulas:update', {
                     ...payload,
                     id: editingFormula.id,
-                    oldName: editingFormula.name
+                    oldName: editingFormula.name,
+                    barcode: formulaBarcode.trim() || undefined
                 })
             } else {
                 res = await window.api.invoke('formulas:add', payload)
@@ -154,9 +155,18 @@ function FormulaCreator({ products, onRefresh, notify, editingFormula, onCancelE
         }
     }
 
-    const generateBarcode = () => {
-        const randomPart = Math.floor(100000000 + Math.random() * 900000000).toString();
-        setFormulaBarcode('622' + randomPart);
+    const generateBarcode = async () => {
+        try {
+            if (editingFormula?.id) {
+                const ean = await window.api.getFormulaEan13(editingFormula.id)
+                setFormulaBarcode(ean)
+            } else {
+                const ean = await window.api.randomFormulaEan13()
+                setFormulaBarcode(ean)
+            }
+        } catch (_) {
+            notify('تعذر توليد الباركود', 'error')
+        }
     }
 
     return (

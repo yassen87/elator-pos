@@ -2,6 +2,33 @@ import React, { useState, useEffect } from 'react'
 import { Plus, PlusCircle, Search, History, Banknote, Save, Trash2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 
+/** تجهيز حقول سعر الشراء / القطاعي / الجملة من بيانات المنتج المخزّنة */
+function purchasePriceFieldsFromProduct(p) {
+    if (!p) return { unit_price: '', selling_price: '', wholesale_price: '' }
+    const isOil = p.category === 'oil' || p.category === 'زيت'
+    const isMl = p.sell_unit === 'ml'
+    const isGram = p.sell_unit === 'gram'
+    const cost = isOil
+        ? (parseFloat(p.cost_price_per_ml) || parseFloat(p.cost_price) || 0)
+        : (parseFloat(p.cost_price) || 0)
+    const retail = isOil
+        ? (parseFloat(p.price_per_ml) || parseFloat(p.price_per_gram) || parseFloat(p.price) || 0)
+        : isMl
+            ? (parseFloat(p.price_per_ml) || parseFloat(p.price) || 0)
+            : isGram
+                ? (parseFloat(p.price_per_gram) || parseFloat(p.price) || 0)
+                : (parseFloat(p.price) || 0)
+    const wholesale = isOil
+        ? (parseFloat(p.wholesale_price_per_ml) || parseFloat(p.wholesale_price_per_gram) || parseFloat(p.wholesale_price) || 0)
+        : isMl
+            ? (parseFloat(p.wholesale_price_per_ml) || parseFloat(p.wholesale_price) || 0)
+            : isGram
+                ? (parseFloat(p.wholesale_price_per_gram) || parseFloat(p.wholesale_price) || 0)
+                : (parseFloat(p.wholesale_price) || 0)
+    const sz = (n) => (n > 0 ? String(n) : '')
+    return { unit_price: sz(cost), selling_price: sz(retail), wholesale_price: sz(wholesale) }
+}
+
 export function SuppliersView({ products = [], onRefresh, notify, ask }) {
     const [suppliers, setSuppliers] = useState([])
     const [search, setSearch] = useState('')
@@ -20,61 +47,88 @@ export function SuppliersView({ products = [], onRefresh, notify, ask }) {
     const [productSearchTerm, setProductSearchTerm] = useState('')
     const [activeSearchIdx, setActiveSearchIdx] = useState(null)
     const [showQuickProduct, setShowQuickProduct] = useState(false)
-    const [qpd, setQpd] = useState({ name: '', price: '', category: 'product', barcode: '', qty: '1' })
+    const emptyPurchaseRow = () => ({ product_id: '', quantity: '', unit_price: '', selling_price: '', wholesale_price: '' })
+    const [qpd, setQpd] = useState({ name: '', price: '', unit_price: '', wholesale_price: '', category: 'product', barcode: '', qty: '1' })
 
     // Barcode Listener for Purchase Screen
     useEffect(() => {
-        if (!showPurchase) return;
+        if (!showPurchase) return
 
-        let buffer = '';
-        let lastKeyTime = Date.now();
+        let buffer = ''
+        let lastKeyTime = Date.now()
 
         const handleBarcodePurchase = (e) => {
-            const currentTime = Date.now();
-            if (currentTime - lastKeyTime > 200) buffer = ''; // Increased to 200ms for reliability
-            lastKeyTime = currentTime;
+            const currentTime = Date.now()
+            if (currentTime - lastKeyTime > 200) buffer = ''
+            lastKeyTime = currentTime
 
             if (e.key === 'Enter') {
                 if (buffer.length > 2) {
-                    const safeProducts = products || [];
-                    const product = safeProducts.find(p => p.barcode === buffer || p.barcode === buffer.trim());
-
-                    if (product) {
-                        // If we are in Quick Add mode, we might want to switch to this product? 
-                        // But user specifically asked for "Rapid Add" of NEW products.
-                        // Existing products should just be added to the list.
-                        notify(`تم إضافة: ${product.name}`, 'success');
-                        setPurchaseItems(prev => {
-                            const lastItem = prev[prev.length - 1];
-                            if (lastItem && !lastItem.product_id) {
-                                const newArr = [...prev];
-                                newArr[prev.length - 1] = { product_id: product.id, quantity: 1, unit_price: product.price || 0 };
-                                return [...newArr, { product_id: '', quantity: '', unit_price: '' }];
-                            }
-                            return [...prev, { product_id: product.id, quantity: 1, unit_price: product.price || 0 }, { product_id: '', quantity: '', unit_price: '' }];
-                        });
-                        if (showQuickProduct) setShowQuickProduct(false);
-                    } else {
-                        // Rapid Workflow: If already in Quick Add and scanning a NEW barcode
-                        if (showQuickProduct && qpd.barcode !== buffer) {
-                            notify('تم رصد باركود جديد، يرجى إدخال بيانات المنتج الجديد', 'info');
-                            setQpd({ name: '', price: '', category: 'oil', barcode: buffer });
-                        } else if (!showQuickProduct) {
-                            notify('منتج غير مسجل، جاري فتح إضافة المنتج السريع...', 'warning');
-                            setQpd({ name: '', price: '', category: 'oil', barcode: buffer });
-                            setShowQuickProduct(true);
+                    const code = buffer.trim()
+                    void (async () => {
+                        const safeProducts = products || []
+                        let product = safeProducts.find(p => String(p.barcode || '').trim() === code)
+                        if (!product && window.api?.findProductByBarcode) {
+                            try {
+                                product = await window.api.findProductByBarcode(code)
+                            } catch (_) {}
                         }
-                    }
-                    buffer = '';
+
+                        if (product) {
+                            const defs = purchasePriceFieldsFromProduct(product)
+                            notify(`تم مسح: ${product.name}`, 'success')
+                            if (showQuickProduct) setShowQuickProduct(false)
+                            setPurchaseItems(prev => {
+                                for (let i = prev.length - 1; i >= 0; i--) {
+                                    if (String(prev[i].product_id) === String(product.id)) {
+                                        const copy = [...prev]
+                                        const q = (parseFloat(copy[i].quantity) || 0) + 1
+                                        copy[i] = {
+                                            ...copy[i],
+                                            quantity: String(q),
+                                            unit_price: copy[i].unit_price || defs.unit_price,
+                                            selling_price: copy[i].selling_price || defs.selling_price,
+                                            wholesale_price: copy[i].wholesale_price || defs.wholesale_price
+                                        }
+                                        return copy
+                                    }
+                                }
+                                const lastItem = prev[prev.length - 1]
+                                const line = {
+                                    product_id: product.id,
+                                    quantity: '1',
+                                    unit_price: defs.unit_price || String(parseFloat(product.price) || 0),
+                                    selling_price: defs.selling_price,
+                                    wholesale_price: defs.wholesale_price
+                                }
+                                if (lastItem && !lastItem.product_id) {
+                                    const newArr = [...prev]
+                                    newArr[prev.length - 1] = line
+                                    return [...newArr, emptyPurchaseRow()]
+                                }
+                                return [...prev, line, emptyPurchaseRow()]
+                            })
+                        } else {
+                            if (showQuickProduct && qpd.barcode !== code) {
+                                notify('باركود جديد — أدخل بيانات المنتج', 'info')
+                                setQpd({ name: '', price: '', unit_price: '', wholesale_price: '', category: 'oil', barcode: code, qty: '1' })
+                            } else if (!showQuickProduct) {
+                                notify('منتج غير مسجل — إضافة سريعة', 'warning')
+                                setQpd({ name: '', price: '', unit_price: '', wholesale_price: '', category: 'oil', barcode: code, qty: '1' })
+                                setShowQuickProduct(true)
+                            }
+                        }
+                    })()
+                    buffer = ''
                 }
             } else if (e.key.length === 1) {
-                buffer += e.key;
+                buffer += e.key
             }
-        };
+        }
 
-        window.addEventListener('keydown', handleBarcodePurchase);
-        return () => window.removeEventListener('keydown', handleBarcodePurchase);
-    }, [showPurchase, showQuickProduct, products, qpd.barcode]);
+        window.addEventListener('keydown', handleBarcodePurchase)
+        return () => window.removeEventListener('keydown', handleBarcodePurchase)
+    }, [showPurchase, showQuickProduct, products, qpd.barcode])
 
     // Form for new supplier
     const [newName, setNewName] = useState('')
@@ -185,38 +239,54 @@ export function SuppliersView({ products = [], onRefresh, notify, ask }) {
     const handleQuickProductAdd = async () => {
         if (!qpd.name) return notify('يرجى إدخال اسم المنتج', 'error')
         const priceNum = parseFloat(qpd.price) || 0
+        const costNum = parseFloat(qpd.unit_price) || 0
+        const wholesaleNum = parseFloat(qpd.wholesale_price) || 0
+        const qtyStock = parseFloat(qpd.qty) || 0
+        const isOil = qpd.category === 'oil'
+        const isBottle = qpd.category === 'bottle'
+
         const res = await window.api.addProduct({
             name: qpd.name,
-            price: qpd.category !== 'oil' ? priceNum : 0,
-            price_per_ml: qpd.category === 'oil' ? priceNum : 0,
-            stock_quantity: 0,
+            sell_unit: isOil ? 'ml' : 'piece',
+            price: !isOil ? priceNum : 0,
+            price_per_ml: isOil ? priceNum : 0,
+            price_per_gram: 0,
+            stock_quantity: qtyStock,
+            total_ml: isOil ? qtyStock : 0,
+            total_gram: 0,
             min_stock: 10,
             category: qpd.category,
-            barcode: qpd.barcode,
-            wholesale_price: qpd.category !== 'oil' ? (parseFloat(qpd.wholesale_price) || 0) : 0,
-            wholesale_price_per_ml: qpd.category === 'oil' ? (parseFloat(qpd.wholesale_price) || 0) : 0
+            barcode: qpd.barcode || null,
+            wholesale_price: !isOil ? wholesaleNum : 0,
+            wholesale_price_per_ml: isOil ? wholesaleNum : 0,
+            wholesale_price_per_gram: 0
         })
 
         if (res.success) {
-            notify('تم إضافة المنتج بنجاح', 'success')
-            onRefresh()
+            notify('تم إضافة المنتج وفتح سطر في الفاتورة', 'success')
+            await onRefresh?.()
 
-            // Add to purchase items list
-            const qtyNum = parseFloat(qpd.qty) || 1
-            const newItem = { product_id: res.id, quantity: qtyNum, unit_price: priceNum }
+            const qtyLine = qtyStock > 0 ? qtyStock : 1
+            const newItem = {
+                product_id: res.id,
+                quantity: String(qtyLine),
+                unit_price: String(costNum > 0 ? costNum : priceNum),
+                selling_price: String(priceNum),
+                wholesale_price: String(wholesaleNum)
+            }
 
             setPurchaseItems(prev => {
                 const lastItem = prev[prev.length - 1]
                 if (lastItem && !lastItem.product_id) {
                     const newArr = [...prev]
                     newArr[prev.length - 1] = newItem
-                    return [...newArr, { product_id: '', quantity: '', unit_price: '' }]
+                    return [...newArr, emptyPurchaseRow()]
                 }
-                return [...prev, newItem, { product_id: '', quantity: '', unit_price: '' }]
+                return [...prev, newItem, emptyPurchaseRow()]
             })
 
             setShowQuickProduct(false)
-            setQpd({ name: '', price: '', wholesale_price: '', category: 'product', barcode: '', qty: '1' })
+            setQpd({ name: '', price: '', unit_price: '', wholesale_price: '', category: 'product', barcode: '', qty: '1' })
             setActiveSearchIdx(null)
         }
     }
@@ -226,13 +296,16 @@ export function SuppliersView({ products = [], onRefresh, notify, ask }) {
         try {
             const product = await window.api.findProductByBarcode(code)
             if (product) {
-                notify('هذا الباركود مسجل لمنتج بالفعل، تم جلب بياناته', 'info')
+                notify('هذا الباركود مسجل — تم ملء الحقول', 'info')
+                const defs = purchasePriceFieldsFromProduct(product)
                 setQpd({
                     ...qpd,
                     name: product.name,
-                    category: product.category,
-                    price: product.category === 'oil' ? (product.price_per_ml || '').toString() : (product.price || '').toString(),
-                    barcode: product.barcode
+                    category: product.category || 'product',
+                    price: product.category === 'oil' ? (product.price_per_ml ?? product.price ?? '').toString() : (product.price || '').toString(),
+                    unit_price: defs.unit_price,
+                    wholesale_price: defs.wholesale_price,
+                    barcode: product.barcode || code
                 })
             }
         } catch (err) {
@@ -377,65 +450,105 @@ export function SuppliersView({ products = [], onRefresh, notify, ask }) {
 
                             <div className="space-y-4 mb-8">
                                 {purchaseItems.map((item, idx) => (
-                                    <div key={idx} className="grid grid-cols-12 gap-4 bg-slate-50 p-4 rounded-2xl items-center">
-                                        <div className="col-span-4 relative">
+                                    <div key={idx} className="grid grid-cols-12 gap-3 bg-slate-50 p-4 rounded-2xl items-center border border-slate-100 hover:border-slate-300 transition-all">
+                                        <div className="col-span-3 relative">
                                             <input
                                                 type="text"
                                                 placeholder="ابحث عن منتج..."
                                                 value={activeSearchIdx === idx ? productSearchTerm : ((products || []).find(p => p.id === item.product_id)?.name || '')}
                                                 onFocus={() => { setActiveSearchIdx(idx); setProductSearchTerm(''); }}
                                                 onChange={e => setProductSearchTerm(e.target.value)}
-                                                className="w-full bg-white border border-slate-200 rounded-xl p-3 font-bold text-right"
+                                                className="w-full bg-white border border-slate-200 rounded-xl p-3 font-black text-xs text-right"
                                             />
                                             {activeSearchIdx === idx && (
-                                                <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-100 rounded-2xl shadow-2xl z-[110] max-h-60 overflow-y-auto">
+                                                <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-2xl z-[110] max-h-60 overflow-y-auto">
                                                     <div className="p-2 border-b border-slate-50">
-                                                        <button onClick={() => { setQpd({ ...qpd, name: productSearchTerm }); setShowQuickProduct(true); }} className="w-full p-3 bg-brand-primary/5 text-brand-primary rounded-xl font-black text-xs flex items-center justify-center gap-2">
+                                                        <button onClick={() => { setQpd({ ...qpd, name: productSearchTerm }); setShowQuickProduct(true); }} className="w-full p-3 bg-brand-primary/5 text-brand-primary rounded-xl font-black text-[10px] flex items-center justify-center gap-2">
                                                             <PlusCircle className="w-4 h-4" /> إضافة منتج جديد: "{productSearchTerm}"
                                                         </button>
                                                     </div>
                                                     {(products || []).filter(p => !p.category || p.category !== 'formula').filter(p => p.name.includes(productSearchTerm)).map(p => (
-                                                        <div key={p.id} onClick={() => { const newArr = [...purchaseItems]; newArr[idx].product_id = p.id; setPurchaseItems(newArr); setActiveSearchIdx(null); }} className="p-3 hover:bg-slate-50 cursor-pointer text-right font-bold border-b last:border-0">{p.name}</div>
+                                                        <div key={p.id} onClick={() => {
+                                                            const defs = purchasePriceFieldsFromProduct(p)
+                                                            const newArr = [...purchaseItems]
+                                                            newArr[idx] = {
+                                                                ...newArr[idx],
+                                                                product_id: p.id,
+                                                                quantity: newArr[idx].quantity || '1',
+                                                                unit_price: defs.unit_price || newArr[idx].unit_price,
+                                                                selling_price: defs.selling_price || newArr[idx].selling_price,
+                                                                wholesale_price: defs.wholesale_price || newArr[idx].wholesale_price
+                                                            }
+                                                            setPurchaseItems(newArr)
+                                                            setActiveSearchIdx(null)
+                                                        }} className="p-3 hover:bg-slate-50 cursor-pointer text-right font-bold border-b last:border-0 text-sm">{p.name}</div>
                                                     ))}
                                                 </div>
                                             )}
                                         </div>
+                                        <div className="col-span-1.5">
+                                            <label className="block text-[10px] text-slate-400 font-bold mb-1 text-center">الكمية</label>
+                                            <input type="number" step="any" placeholder="الكمية" value={item.quantity} onChange={e => { const newArr = [...purchaseItems]; newArr[idx].quantity = e.target.value; setPurchaseItems(newArr); }} className="w-full bg-white border border-slate-200 rounded-xl p-3 text-center font-black text-sm" title="الكمية المشتراة" />
+                                        </div>
                                         <div className="col-span-2">
-                                            <input type="number" placeholder="الكمية" value={item.quantity} onChange={e => { const newArr = [...purchaseItems]; newArr[idx].quantity = e.target.value; setPurchaseItems(newArr); }} className="w-full bg-white border border-slate-200 rounded-xl p-3 text-center font-bold" title="الكمية المشتراة" />
+                                            <label className="block text-[10px] text-slate-400 font-bold mb-1 text-center">سعر الشراء</label>
+                                            <input type="number" step="any" placeholder="الشراء" value={item.unit_price} onChange={e => { const newArr = [...purchaseItems]; newArr[idx].unit_price = e.target.value; setPurchaseItems(newArr); }} className="w-full bg-amber-50/50 border border-amber-100 rounded-xl p-3 text-center font-black text-amber-700 text-sm" title="سعر الشراء من المورد" />
+                                        </div>
+                                        <div className="col-span-2">
+                                            <label className="block text-[10px] text-slate-400 font-bold mb-1 text-center">سعر القطاعي</label>
+                                            <input type="number" step="any" placeholder="قطاعي" value={item.selling_price} onChange={e => { const newArr = [...purchaseItems]; newArr[idx].selling_price = e.target.value; setPurchaseItems(newArr); }} className="w-full bg-green-50/50 border border-green-100 rounded-xl p-3 text-center font-black text-green-700 text-sm" title="سعر البيع للجمهور (قطاعي)" />
                                         </div>
                                         <div className="col-span-2.5">
-                                            <input type="number" placeholder="سعر الشراء" value={item.unit_price} onChange={e => { const newArr = [...purchaseItems]; newArr[idx].unit_price = e.target.value; setPurchaseItems(newArr); }} className="w-full bg-white border border-slate-200 rounded-xl p-3 text-center font-bold text-amber-600" title="سعر الشراء من المورد" />
+                                            <label className="block text-[10px] text-slate-400 font-bold mb-1 text-center">سعر الجملة</label>
+                                            <input type="number" step="any" placeholder="الجملة" value={item.wholesale_price} onChange={e => { const newArr = [...purchaseItems]; newArr[idx].wholesale_price = e.target.value; setPurchaseItems(newArr); }} className="w-full bg-blue-50/50 border border-blue-100 rounded-xl p-3 text-center font-black text-blue-700 text-sm" title="سعر البيع بالجملة" />
                                         </div>
-                                        <div className="col-span-2.5">
-                                            <input type="number" placeholder="سعر البيع" value={item.selling_price} onChange={e => { const newArr = [...purchaseItems]; newArr[idx].selling_price = e.target.value; setPurchaseItems(newArr); }} className="w-full bg-white border border-slate-200 rounded-xl p-3 text-center font-bold text-green-600" title="سعر البيع للجمهور" />
-                                        </div>
-                                        <div className="col-span-1 flex justify-center">
-                                            <button onClick={() => setPurchaseItems(purchaseItems.filter((_, i) => i !== idx))} className="text-red-400 p-2 bg-red-50 rounded-lg"><Trash2 className="w-5 h-5" /></button>
+                                        <div className="col-span-1 flex justify-center pt-5">
+                                            <button onClick={() => setPurchaseItems(purchaseItems.filter((_, i) => i !== idx))} className="text-red-400 p-2 bg-red-50 rounded-lg hover:bg-red-500 hover:text-white transition-all"><Trash2 className="w-4 h-4" /></button>
                                         </div>
                                     </div>
                                 ))}
-                                <button onClick={() => setPurchaseItems([...purchaseItems, { product_id: '', quantity: '', unit_price: '', selling_price: '', wholesale_price: '' }])} className="w-full py-4 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 font-bold flex items-center justify-center gap-2"><PlusCircle className="w-5 h-5" /> إضافة صنف آخر</button>
+                                <button onClick={() => setPurchaseItems([...purchaseItems, { product_id: '', quantity: '', unit_price: '', selling_price: '', wholesale_price: '' }])} className="w-full py-4 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 font-black flex items-center justify-center gap-2 hover:border-brand-primary/50 hover:text-brand-primary transition-all"><PlusCircle className="w-5 h-5" /> إضافة صنف آخر</button>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-8 border-t border-slate-100 pt-8">
-                                <div className="space-y-4">
-                                    <div className="p-6 bg-slate-50 border-2 border-slate-100 rounded-2xl flex items-center justify-between">
-                                        <div className="text-right">
-                                            <p className="text-slate-500 font-bold mb-1">تسجيل المتبقي كمديونية؟</p>
+                            <div className="grid grid-cols-12 gap-8 border-t border-slate-100 pt-8">
+                                <div className="col-span-7 space-y-4">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="p-6 bg-slate-900 rounded-[2rem] text-white text-right shadow-xl">
+                                            <p className="text-slate-400 font-bold text-[10px] mb-1 uppercase tracking-widest">إجمالي الفاتورة</p>
+                                            <p className="text-3xl font-black">
+                                                {purchaseItems.reduce((acc, i) => acc + ((parseFloat(i.quantity) || 0) * (parseFloat(i.unit_price) || 0)), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ج.م
+                                            </p>
                                         </div>
-                                        <button onClick={() => setRecordDebt(!recordDebt)} className={`w-14 h-8 rounded-full transition-all relative ${recordDebt ? 'bg-brand-primary' : 'bg-slate-200'}`}><div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all ${recordDebt ? 'right-7' : 'right-1'}`} /></button>
+                                        <div className="p-6 bg-red-50 border-2 border-red-100 rounded-[2rem] text-red-600 text-right">
+                                            <p className="text-red-400 font-bold text-[10px] mb-1 uppercase tracking-widest">المتبقي (مديونية)</p>
+                                            <p className="text-3xl font-black">
+                                                {(purchaseItems.reduce((acc, i) => acc + ((parseFloat(i.quantity) || 0) * (parseFloat(i.unit_price) || 0)), 0) - (parseFloat(paidAmount) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ج.م
+                                            </p>
+                                        </div>
                                     </div>
-                                    <div className="p-6 bg-slate-900 rounded-[2rem] text-white text-right">
-                                        <p className="text-slate-400 font-bold text-sm mb-1 uppercase tracking-widest">إجمالي الفاتورة</p>
-                                        <p className="text-3xl font-black">{purchaseItems.reduce((acc, i) => acc + ((parseFloat(i.quantity) || 0) * (parseFloat(i.unit_price) || 0)), 0).toFixed(2)} ج.م</p>
-                                    </div>
-                                    <div className="space-y-2 text-right">
-                                        <label className="text-sm font-black text-slate-500">المبلغ المدفوع كاش</label>
-                                        <input type="number" value={paidAmount} onChange={e => setPaidAmount(e.target.value)} className="w-full bg-green-50/50 border-2 border-green-100 rounded-[1.5rem] p-5 font-black text-2xl text-green-700 outline-none" placeholder="كم دفعت للمورد؟" />
+                                    
+                                    <div className="flex items-center justify-between bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                                        <div className="text-right">
+                                            <p className="text-slate-700 font-black text-sm">تسجيل المتبقي كمديونية تلقائياً؟</p>
+                                            <p className="text-slate-400 font-bold text-[10px]">سيتم إضافة المبلغ المتبقي لحساب المورد</p>
+                                        </div>
+                                        <button onClick={() => setRecordDebt(!recordDebt)} className={`w-14 h-8 rounded-full transition-all relative ${recordDebt ? 'bg-brand-primary' : 'bg-slate-200'}`}><div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all ${recordDebt ? (document.dir === 'rtl' ? 'left-7' : 'right-7') : (document.dir === 'rtl' ? 'left-1' : 'right-1')}`} /></button>
                                     </div>
                                 </div>
-                                <div className="flex flex-col justify-end">
-                                    <button onClick={handlePurchase} className="h-24 bg-brand-primary text-white rounded-[2rem] font-black text-2xl shadow-2xl flex items-center justify-center gap-4 hover:scale-[1.02] transition-all"><Save className="w-8 h-8" /> تأكيد وحفظ الفاتورة</button>
+
+                                <div className="col-span-5 flex flex-col justify-between space-y-4">
+                                    <div className="space-y-2 text-right">
+                                        <label className="text-xs font-black text-slate-500 mr-2">المبلغ المدفوع حالياً (كاش)</label>
+                                        <input 
+                                            type="number" 
+                                            step="any"
+                                            value={paidAmount} 
+                                            onChange={e => setPaidAmount(e.target.value)} 
+                                            className="w-full bg-green-50 border-2 border-green-100 rounded-[2rem] p-6 font-black text-3xl text-green-700 outline-none focus:ring-4 focus:ring-green-500/10 transition-all" 
+                                            placeholder="0.00" 
+                                        />
+                                    </div>
+                                    <button onClick={handlePurchase} className="h-24 bg-brand-primary text-white rounded-[2rem] font-black text-2xl shadow-2xl shadow-brand-primary/30 flex items-center justify-center gap-4 hover:scale-[1.02] active:scale-95 transition-all"><Save className="w-8 h-8" /> حفظ الفاتورة</button>
                                 </div>
                             </div>
                         </motion.div>
@@ -520,7 +633,7 @@ export function SuppliersView({ products = [], onRefresh, notify, ask }) {
                                 <div className="space-y-1"><label className="text-xs font-black text-slate-400">اسم المنتج</label><input value={qpd.name} onChange={e => setQpd({ ...qpd, name: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 font-bold text-right" /></div>
                                 <div className="space-y-1"><label className="text-xs font-black text-slate-400">النوع</label><div className="grid grid-cols-3 gap-2"><button onClick={() => setQpd({ ...qpd, category: 'oil' })} className={`py-2 rounded-xl font-bold text-sm ${qpd.category === 'oil' ? 'bg-brand-primary text-white' : 'bg-slate-50 text-slate-500'}`}>زيت</button><button onClick={() => setQpd({ ...qpd, category: 'bottle' })} className={`py-2 rounded-xl font-bold text-sm ${qpd.category === 'bottle' ? 'bg-brand-primary text-white' : 'bg-slate-50 text-slate-500'}`}>زجاجة</button><button onClick={() => setQpd({ ...qpd, category: 'product' })} className={`py-2 rounded-xl font-bold text-sm ${qpd.category === 'product' ? 'bg-brand-primary text-white' : 'bg-slate-50 text-slate-500'}`}>منتج</button></div></div>
                                 <div className="space-y-1">
-                                    <label className="text-xs font-black text-slate-400">سعر البيع</label>
+                                    <label className="text-xs font-black text-slate-400">سعر البيع (قطاعي)</label>
                                     <input type="number" value={qpd.price} onChange={e => setQpd({ ...qpd, price: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 font-bold text-right text-green-600" placeholder="0.00" />
                                 </div>
                                 <div className="space-y-1">
@@ -528,7 +641,11 @@ export function SuppliersView({ products = [], onRefresh, notify, ask }) {
                                     <input type="number" value={qpd.unit_price} onChange={e => setQpd({ ...qpd, unit_price: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 font-bold text-right text-amber-600" placeholder="0.00" />
                                 </div>
                                 <div className="space-y-1">
-                                    <label className="text-xs font-black text-slate-400">الكمية</label>
+                                    <label className="text-xs font-black text-slate-400">سعر الجملة</label>
+                                    <input type="number" value={qpd.wholesale_price} onChange={e => setQpd({ ...qpd, wholesale_price: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 font-bold text-right text-blue-600" placeholder="0.00" />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-black text-slate-400">الكمية (المخزون)</label>
                                     <input type="number" value={qpd.qty} onChange={e => setQpd({ ...qpd, qty: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 font-bold text-right" placeholder="1" />
                                 </div>
                                 <div className="space-y-1">

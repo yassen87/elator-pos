@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
     Plus,
     Search,
@@ -11,7 +11,8 @@ import {
     Barcode,
     Printer,
     Globe,
-    Link as LinkIcon
+    Link as LinkIcon,
+    RefreshCw
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useReactToPrint } from 'react-to-print'
@@ -133,6 +134,18 @@ export function ProductsView({ products, onRefresh, notify, ask, user, settings 
     const pricingMode = settings?.pricing_mode || 'both' // 'both', 'wholesale', 'retail'
     const globalUnit = settings?.global_unit || 'gram'
 
+    const filteredProducts = useMemo(() => {
+        const q = searchQuery.trim().toLowerCase()
+        if (!q) return products
+        return products.filter(p =>
+            p.name.toLowerCase().includes(q) ||
+            (p.category === 'oil' && ('زيت'.includes(q) || 'oil'.includes(q))) ||
+            (p.category === 'bottle' && ('زجاجة'.includes(q) || 'bottle'.includes(q))) ||
+            (p.category === 'product' && ('منتج'.includes(q) || 'product'.includes(q))) ||
+            (p.barcode && p.barcode.toString().includes(q))
+        )
+    }, [products, searchQuery])
+
     // Update sellUnit when global setting changes (for new products)
     useEffect(() => {
         if (!editingProduct) {
@@ -243,9 +256,34 @@ export function ProductsView({ products, onRefresh, notify, ask, user, settings 
         }
     };
 
-    const generateBarcode = () => {
-        const randomPart = Math.floor(100000000 + Math.random() * 900000000).toString();
-        setBarcode('622' + randomPart);
+    const generateBarcode = async () => {
+        try {
+            const ean = await window.api.randomEan13()
+            setBarcode(ean)
+        } catch (err) {
+            console.error(err)
+            notify('تعذر توليد الباركود', 'error')
+        }
+    }
+
+    const handleRegenerateAllBarcodes = () => {
+        ask(
+            'تجديد باركودات المنتجات',
+            'سيتم استبدال باركود كل المنتجات بكود EAN-13 صالح (622 + رقم المنتج). المتابعة؟',
+            async () => {
+                try {
+                    const res = await window.api.regenerateProductBarcodes()
+                    if (res?.success) {
+                        notify(`تم تحديث ${res.count} منتج بنجاح`, 'success')
+                        onRefresh()
+                    } else {
+                        notify(res?.message || 'فشل التحديث', 'error')
+                    }
+                } catch (e) {
+                    notify('حدث خطأ أثناء التحديث', 'error')
+                }
+            }
+        )
     }
 
     const handleDelete = async (id) => {
@@ -326,8 +364,16 @@ export function ProductsView({ products, onRefresh, notify, ask, user, settings 
                         <p className="text-sm font-bold text-slate-500">أضف وعدل منتجات المحل</p>
                     </div>
                 </div>
-
-
+                {can('products:edit') && (
+                    <button
+                        type="button"
+                        onClick={handleRegenerateAllBarcodes}
+                        className="flex items-center gap-2 px-5 py-3 rounded-xl font-black text-sm bg-slate-900 text-white hover:bg-black transition-all shadow-md"
+                    >
+                        <RefreshCw className="w-4 h-4" />
+                        تجديد باركودات كل المنتجات
+                    </button>
+                )}
             </div>
 
             <form onSubmit={handleAdd} className="bg-white border border-slate-200 p-6 rounded-2xl grid grid-cols-1 md:grid-cols-6 gap-4 items-end shadow-sm">
@@ -374,12 +420,9 @@ export function ProductsView({ products, onRefresh, notify, ask, user, settings 
                                 )}
                                 <button
                                     type="button"
-                                    onClick={() => {
-                                        const randomPart = Math.floor(100000000 + Math.random() * 900000000).toString();
-                                        setBarcode('622' + randomPart);
-                                    }}
+                                    onClick={() => generateBarcode()}
                                     className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:text-brand-primary hover:border-brand-primary/20 transition-all active:scale-95"
-                                    title="توليد باركود"
+                                    title="توليد باركود EAN-13"
                                 >
                                     <Barcode className="w-5 h-5" />
                                 </button>
@@ -517,16 +560,7 @@ export function ProductsView({ products, onRefresh, notify, ask, user, settings 
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                        {products
-                            .filter(p => {
-                                if (!searchQuery.trim()) return true
-                                const query = searchQuery.toLowerCase()
-                                return p.name.toLowerCase().includes(query) ||
-                                    (p.category === 'oil' && ('زيت'.includes(query) || 'oil'.includes(query))) ||
-                                    (p.category === 'bottle' && ('زجاجة'.includes(query) || 'bottle'.includes(query))) ||
-                                    (p.category === 'product' && ('منتج'.includes(query) || 'product'.includes(query))) ||
-                                    (p.barcode && p.barcode.toString().includes(query))
-                            })
+                        {filteredProducts
                             .map((p, index) => {
                                 const isOil = p.category === 'oil' || p.category === 'زيت';
                                 const isGram = isOil ? true : (p.sell_unit === 'gram');
@@ -901,12 +935,16 @@ export function ProductsView({ products, onRefresh, notify, ask, user, settings 
                                                 )}
                                                 <button
                                                     type="button"
-                                                    onClick={() => {
-                                                        const randomPart = Math.floor(100000000 + Math.random() * 900000000).toString();
-                                                        setEditingProduct({ ...editingProduct, barcode: '622' + randomPart });
+                                                    onClick={async () => {
+                                                        try {
+                                                            const ean = await window.api.getProductEan13(editingProduct.id)
+                                                            setEditingProduct({ ...editingProduct, barcode: ean })
+                                                        } catch (_) {
+                                                            notify('تعذر توليد الباركود', 'error')
+                                                        }
                                                     }}
                                                     className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:text-brand-primary hover:border-brand-primary/20 transition-all active:scale-95"
-                                                    title="توليد باركود"
+                                                    title="باركود من رقم المنتج (622 + ID)"
                                                 >
                                                     <Barcode className="w-4 h-4" />
                                                 </button>
